@@ -32,10 +32,10 @@ project( intro_motion_blur )
 message("\nPROJECT_NAME = " "${PROJECT_NAME}")
 
 find_package(OpenGL REQUIRED)
-find_package(GLFW REQUIRED)
-find_package(GLEW REQUIRED)
+#find_package(GLFW REQUIRED)
+#find_package(GLEW REQUIRED)
 find_package(CUDAToolkit 10.0 REQUIRED)
-find_package(DevIL_1_8_0 REQUIRED)
+#find_package(DevIL_1_8_0 REQUIRED)
 
 # OptiX SDK 7.x versions are searched inside the top-level CMakeLists.txt.
 # This example requires OptiX SDK 7.2.0 or newer because that removed the OptixBuildInputInstanceArray aabbs and numAabbs fields.

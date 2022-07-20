@@ -507,7 +507,7 @@ void Application::guiNewFrame()
 
 void Application::guiReferenceManual()
 {
-  ImGui::ShowTestWindow();
+//  ImGui::ShowTestWindow();
 }
 
 void Application::guiRender()
@@ -739,7 +739,7 @@ void Application::guiWindow()
 
   bool refresh = false;
 
-  ImGui::SetNextWindowSize(ImVec2(200, 200), ImGuiSetCond_FirstUseEver);
+  ImGui::SetNextWindowSize(ImVec2(200, 200), ImGuiCond_FirstUseEver);
 
   ImGuiWindowFlags window_flags = 0;
   if (!ImGui::Begin("nvlink_shared", nullptr, window_flags)) // No bool flag to omit the close button.

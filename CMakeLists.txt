@@ -2,6 +2,8 @@ cmake_minimum_required(VERSION 3.17)
 
 project( optix_apps )
 
+SET(ENV{OPTIX74_PATH} /usr/local/NVIDIA-OptiX-SDK-7.4.0-linux64-x86_64)
+
 set(LOCAL_3RDPARTY "${CMAKE_CURRENT_SOURCE_DIR}/3rdparty")
 message("LOCAL_3RDPARTY = " "${LOCAL_3RDPARTY}")
 
@@ -85,5 +87,32 @@ find_package(OptiX71)
 find_package(OptiX72)
 find_package(OptiX73)
 find_package(OptiX74)
+
+SET(BUILD_WITH_GUI ON)
+
+add_subdirectory(third_party)
+
+SET(GLFW_INCLUDE_DIR third_party/glfw/include)
+SET(GLFW_LIBRARIES glfw libglew_shared imgui)
+#SET(ILUT_LIBRARIES ILUT)
+SET(ILUT_LIBRARIES "")
+##SET(ILU_LIBRARIES ILU)
+SET(ILU_LIBRARIES "")
+SET(IL_LIBRARIES IL)
+SET(IL_INCLUDE_DIR third_party/DevIL/DevIL/include)
+SET(ASSIMP_LIBRARIES assimp)
+SET(ASSIMP_INCLUDE_DIRS third_party/assimp/include ${CMAKE_BINARY_DIR}/third_party/assimp/include)
+include_directories(
+        third_party/
+        third_party/DevIL/DevIL/include
+        third_party/imgui
+        third_party/glew-cmake/include
+        third_party/glfw/include
+        ${OPTIX_INCLUDE_DIR}
+        ${CUDA_TOOLKIT_INCLUDE}
+        #${IL_INCLUDE_DIR}
+        third_party/assimp/include
+        #${ASSIMP_INCLUDE_DIRS}
+        )
 
 add_subdirectory( apps )
