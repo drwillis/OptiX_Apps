@@ -1305,7 +1305,7 @@ void Application::guiWindow()
       glUniform1f(glGetUniformLocation(m_glslProgram, "invGamma"), 1.0f / m_gamma);
       glUseProgram(0);
     }
-    if (ImGui::DragFloat("White Point", &m_whitePoint, 0.01f, 0.01f, 255.0f, "%.2f", 2.0f)) // Must not get 0.0f
+    if (ImGui::DragFloat("White Point", &m_whitePoint, 0.01f, 0.01f, 255.0f, "%.2f", ImGuiSliderFlags_Logarithmic)) // Must not get 0.0f
     {
       glUseProgram(m_glslProgram);
       glUniform1f(glGetUniformLocation(m_glslProgram, "invWhitePoint"), m_brightness / m_whitePoint);
@@ -1329,7 +1329,7 @@ void Application::guiWindow()
       glUniform1f(glGetUniformLocation(m_glslProgram, "saturation"), m_saturation);
       glUseProgram(0);
     }
-    if (ImGui::DragFloat("Brightness", &m_brightness, 0.01f, 0.0f, 100.0f, "%.2f", 2.0f))
+    if (ImGui::DragFloat("Brightness", &m_brightness, 0.01f, 0.0f, 100.0f, "%.2f", ImGuiSliderFlags_Logarithmic))
     {
       glUseProgram(m_glslProgram);
       glUniform1f(glGetUniformLocation(m_glslProgram, "invWhitePoint"), m_brightness / m_whitePoint);

@@ -843,7 +843,8 @@ void Application::guiWindow()
     {
       changed = true;
     }
-    if (ImGui::DragFloat("White Point", &m_tonemapperGUI.whitePoint, 0.01f, 0.01f, 255.0f, "%.2f", 2.0f)) // Must not get 0.0f
+//      if (ImGui::DragFloat("White Point", &m_tonemapperGUI.whitePoint, 0.01f, 0.01f, 255.0f, "%.2f", 2.0f)) // Must not get 0.0f
+    if (ImGui::DragFloat("White Point", &m_tonemapperGUI.whitePoint, 0.01f, 0.01f, 255.0f, "%.2f", ImGuiSliderFlags_Logarithmic)) // Must not get 0.0f
     {
       changed = true;
     }
@@ -859,7 +860,8 @@ void Application::guiWindow()
     {
       changed = true;
     }
-    if (ImGui::DragFloat("Brightness", &m_tonemapperGUI.brightness, 0.01f, 0.0f, 100.0f, "%.2f", 2.0f))
+//      if (ImGui::DragFloat("Brightness", &m_tonemapperGUI.brightness, 0.01f, 0.0f, 100.0f, "%.2f", 2.0f))
+    if (ImGui::DragFloat("Brightness", &m_tonemapperGUI.brightness, 0.01f, 0.0f, 100.0f, "%.2f", ImGuiSliderFlags_Logarithmic))
     {
       changed = true;
     }
