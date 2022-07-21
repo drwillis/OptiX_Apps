@@ -1,3 +1,12 @@
+# Enhancements of this forked repository
+
+The code has been modified to use git submodules and a git submodule exists for DevIL, glew, glfw, imgui and assimp dependencies. Linux installs willl still
+require libjpeg-dev, libpng-dev and libtiff-dev to be installed at a minimum to support image loading function of the DevIL library.
+
+Make sure to run the command below to download the third_party code into the project before building the code.
+
+* `git submodule update --init`
+
 # OptiX Applications
 
 Advanced Samples for the [NVIDIA OptiX 7 Ray Tracing SDK](https://developer.nvidia.com/optix)
