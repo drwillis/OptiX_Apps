@@ -295,12 +295,28 @@ Application::Application(GLFWwindow* window,
   m_systemParameter.cameraV            = make_float3(0.0f, 1.0f, 0.0f);
   m_systemParameter.cameraW            = make_float3(0.0f, 0.0f, -1.0f);
 
+//  // Setup ImGui binding.
+//  ImGui::CreateContext();
+//  ImGui_ImplGlfwGL3_Init(window, true);
+//
+//  // This initializes the GLFW part including the font texture.
+//  ImGui_ImplGlfwGL3_NewFrame();
+//  ImGui::EndFrame();
+
+  // The user interface is part of the main application.
   // Setup ImGui binding.
   ImGui::CreateContext();
-  ImGui_ImplGlfwGL3_Init(window, true);
+  //ImGui_ImplOpenGL2_Init();
+  ImGui_ImplOpenGL3_Init();
+  ImGui_ImplGlfw_InitForOpenGL(window, true);
+  //ImGui_ImplGlfwGL3_Init(window, true);
 
   // This initializes the GLFW part including the font texture.
-  ImGui_ImplGlfwGL3_NewFrame();
+  //ImGui_ImplOpenGL2_NewFrame();
+  ImGui_ImplOpenGL3_NewFrame();
+  ImGui_ImplGlfw_NewFrame();
+  ImGui::NewFrame();
+  //ImGui_ImplGlfwGL3_NewFrame();
   ImGui::EndFrame();
 
 #if 1
@@ -417,7 +433,9 @@ Application::~Application()
     glDeleteProgram(m_glslProgram);
   }
 
-  ImGui_ImplGlfwGL3_Shutdown();
+  ImGui_ImplOpenGL3_Shutdown();
+  ImGui_ImplGlfw_Shutdown();
+//    ImGui_ImplGlfwGL3_Shutdown();
   ImGui::DestroyContext();
 }
 
@@ -471,18 +489,22 @@ void Application::reshape(int width, int height)
 
 void Application::guiNewFrame()
 {
-  ImGui_ImplGlfwGL3_NewFrame();
+  ImGui_ImplOpenGL3_NewFrame();
+  ImGui_ImplGlfw_NewFrame();
+  ImGui::NewFrame();
+//  ImGui_ImplGlfwGL3_NewFrame();
 }
 
 void Application::guiReferenceManual()
 {
-//  ImGui::ShowTestWindow();
+  ImGui::ShowDemoWindow();
 }
 
 void Application::guiRender()
 {
   ImGui::Render();
-  ImGui_ImplGlfwGL3_RenderDrawData(ImGui::GetDrawData());
+  ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
+//  ImGui_ImplGlfwGL3_RenderDrawData(ImGui::GetDrawData());
 }
 
 

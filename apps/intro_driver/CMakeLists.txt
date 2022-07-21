@@ -54,19 +54,19 @@ else()
 endif()
 #message("OPTIX_INCLUDE_DIR = " "${OPTIX_INCLUDE_DIR}")
 
-set( IMGUI
-  imgui/imconfig.h
-  imgui/imgui.h
-  imgui/imgui_impl_glfw_gl3.h
-  imgui/imgui_internal.h
-  imgui/stb_rect_pack.h
-  imgui/stb_textedit.h
-  imgui/stb_truetype.h
-  imgui/imgui.cpp
-  imgui/imgui_demo.cpp
-  imgui/imgui_draw.cpp
-  imgui/imgui_impl_glfw_gl3.cpp
-)
+#set( IMGUI
+#  imgui/imconfig.h
+#  imgui/imgui.h
+#  imgui/imgui_impl_glfw_gl3.h
+#  imgui/imgui_internal.h
+#  imgui/stb_rect_pack.h
+#  imgui/stb_textedit.h
+#  imgui/stb_truetype.h
+#  imgui/imgui.cpp
+#  imgui/imgui_demo.cpp
+#  imgui/imgui_draw.cpp
+#  imgui/imgui_impl_glfw_gl3.cpp
+#)
 
 set( HEADERS
   inc/Application.h
@@ -132,7 +132,7 @@ NVCUDA_COMPILE_PTX( SOURCES ${SHADERS}
                     NVCC_OPTIONS "--gpu-architecture=compute_50" "--use_fast_math" "--relocatable-device-code=true" "--generate-line-info" "-Wno-deprecated-gpu-targets" "-I${OPTIX_INCLUDE_DIR}" "-I${CMAKE_CURRENT_SOURCE_DIR}/shaders"
                   )
 
-source_group( "imgui"           FILES ${IMGUI} )
+#source_group( "imgui"           FILES ${IMGUI} )
 source_group( "headers"         FILES ${HEADERS} )
 source_group( "sources"         FILES ${SOURCES} )
 source_group( "shaders"         FILES ${SHADERS} )
@@ -147,7 +147,7 @@ source_group( "ptx"             FILES ${PTX_SOURCES})
 include_directories(
   "."
   "inc"
-  "imgui"
+#  "imgui"
   ${GLEW_INCLUDE_DIRS}
   ${GLFW_INCLUDE_DIR}
   ${OPTIX_INCLUDE_DIR}

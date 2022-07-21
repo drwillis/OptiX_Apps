@@ -133,11 +133,24 @@ Application::Application(GLFWwindow* window, const Options& options)
     // The user interface is part of the main application.
     // Setup ImGui binding.
     ImGui::CreateContext();
-    ImGui_ImplGlfwGL3_Init(window, true);
+    //ImGui_ImplOpenGL2_Init();
+    ImGui_ImplOpenGL3_Init();
+    ImGui_ImplGlfw_InitForOpenGL(window, true);
+    //ImGui_ImplGlfwGL3_Init(window, true);
 
     // This initializes the GLFW part including the font texture.
-    ImGui_ImplGlfwGL3_NewFrame();
+    //ImGui_ImplOpenGL2_NewFrame();
+    ImGui_ImplOpenGL3_NewFrame();
+    ImGui_ImplGlfw_NewFrame();
+    ImGui::NewFrame();
+    //ImGui_ImplGlfwGL3_NewFrame();
     ImGui::EndFrame();
+
+//    ImGui_ImplGlfwGL3_Init(window, true);
+//
+//    // This initializes the GLFW part including the font texture.
+//    ImGui_ImplGlfwGL3_NewFrame();
+//    ImGui::EndFrame();
 
 #if 0
     // Style the GUI colors to a neutral greyscale with plenty of transparency to concentrate on the image.
@@ -330,8 +343,9 @@ Application::~Application()
   {
     delete it->second;
   }
-
-  ImGui_ImplGlfwGL3_Shutdown();
+  ImGui_ImplOpenGL3_Shutdown();
+  ImGui_ImplGlfw_Shutdown();
+//    ImGui_ImplGlfwGL3_Shutdown();
   ImGui::DestroyContext();
 }
 
@@ -502,18 +516,22 @@ void Application::display()
 
 void Application::guiNewFrame()
 {
-  ImGui_ImplGlfwGL3_NewFrame();
+    ImGui_ImplOpenGL3_NewFrame();
+    ImGui_ImplGlfw_NewFrame();
+    ImGui::NewFrame();
+//    ImGui_ImplGlfwGL3_NewFrame();
 }
 
 void Application::guiReferenceManual()
 {
-//  ImGui::ShowTestWindow();
+  ImGui::ShowDemoWindow();
 }
 
 void Application::guiRender()
 {
   ImGui::Render();
-  ImGui_ImplGlfwGL3_RenderDrawData(ImGui::GetDrawData());
+  ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
+//  ImGui_ImplGlfwGL3_RenderDrawData(ImGui::GetDrawData());
 }
 
 // DAR FIXME Move all environment texture handling into the the LightDefinition.

@@ -56,19 +56,19 @@ else()
 endif()
 #message("OPTIX_INCLUDE_DIR = " "${OPTIX_INCLUDE_DIR}")
 
-set( IMGUI
-  imgui/imconfig.h
-  imgui/imgui.h
-  imgui/imgui_impl_glfw_gl3.h
-  imgui/imgui_internal.h
-  imgui/stb_rect_pack.h
-  imgui/stb_textedit.h
-  imgui/stb_truetype.h
-  imgui/imgui.cpp
-  imgui/imgui_demo.cpp
-  imgui/imgui_draw.cpp
-  imgui/imgui_impl_glfw_gl3.cpp
-)
+#set( IMGUI
+#  imgui/imconfig.h
+#  imgui/imgui.h
+#  imgui/imgui_impl_glfw_gl3.h
+#  imgui/imgui_internal.h
+#  imgui/stb_rect_pack.h
+#  imgui/stb_textedit.h
+#  imgui/stb_truetype.h
+#  imgui/imgui.cpp
+#  imgui/imgui_demo.cpp
+#  imgui/imgui_draw.cpp
+#  imgui/imgui_impl_glfw_gl3.cpp
+#)
 
 set( HEADERS
   inc/Application.h
@@ -150,7 +150,7 @@ source_group( "ptx"             FILES ${PTX_SOURCES})
 include_directories(
   "."
   "inc"
-  "imgui"
+#  "imgui"
   ${GLEW_INCLUDE_DIRS}
   ${GLFW_INCLUDE_DIR}
   ${OPTIX_INCLUDE_DIR}
@@ -164,7 +164,7 @@ add_definitions(
 )
 
 add_executable( intro_denoiser
-  ${IMGUI}
+#  ${IMGUI}
   ${HEADERS}
   ${SOURCES}
   ${SHADERS_HEADERS}

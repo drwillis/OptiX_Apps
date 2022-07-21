@@ -41,27 +41,47 @@
 // OptiX 7 function table structure.
 #include <optix_function_table.h>
 
+//#if defined(_WIN32)
+//
+//#ifndef WIN32_LEAN_AND_MEAN
+//#define WIN32_LEAN_AND_MEAN 1
+//#endif
+//
+//#include <windows.h>
+//#endif
+//
+//#include "imgui.h"
+//
+//#define IMGUI_DEFINE_MATH_OPERATORS 1
+//#include "imgui_internal.h"
+//
+//#include "imgui_impl_glfw_gl3.h"
+//
+//#ifndef __APPLE__
+//#  include <GL/glew.h>
+//#  if defined( _WIN32 )
+//#    include <GL/wglew.h>
+//#  endif
+//#endif
 #if defined(_WIN32)
-
 #ifndef WIN32_LEAN_AND_MEAN
 #define WIN32_LEAN_AND_MEAN 1
 #endif
-
 #include <windows.h>
 #endif
 
-#include "imgui.h"
-
+//#include "imgui.h"
+#include <imgui/imgui.h>
 #define IMGUI_DEFINE_MATH_OPERATORS 1
-#include "imgui_internal.h"
+//#include "imgui_internal.h"
+//#include "imgui_impl_glfw.h"
+#include <imgui/imgui_internal.h>
+#include <imgui/backends/imgui_impl_glfw.h>
+#include <imgui/backends/imgui_impl_opengl3.h>
 
-#include "imgui_impl_glfw_gl3.h"
-
-#ifndef __APPLE__
-#  include <GL/glew.h>
-#  if defined( _WIN32 )
-#    include <GL/wglew.h>
-#  endif
+#include <GL/glew.h>
+#if defined( _WIN32 )
+#include <GL/wglew.h>
 #endif
 
 // Needs to be included after OpenGL headers!
