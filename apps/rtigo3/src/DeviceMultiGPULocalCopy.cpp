@@ -158,6 +158,9 @@ void DeviceMultiGPULocalCopy::render(const unsigned int iterationIndex, void** b
 
           CU_CHECK( cuGraphicsGLRegisterBuffer(&m_cudaGraphicsResource, m_pbo, CU_GRAPHICS_REGISTER_FLAGS_WRITE_DISCARD) ); 
           break;
+
+        case INTEROP_MODE_NONE:
+           break;
       }
     }
     // Allocate a GPU local buffer in the per-device launch size. This is where the accumulation happens.
@@ -253,6 +256,10 @@ void DeviceMultiGPULocalCopy::updateDisplayTexture()
         glBindBuffer(GL_PIXEL_UNPACK_BUFFER, 0);
       }
       break;
+
+      case INTEROP_MODE_NONE:
+          synchronizeStream(); // Wait for rendering to finish
+          break;
   }
 }
 

@@ -88,8 +88,8 @@ private:
 public:
   RendererStrategy m_strategy;  // Constructor arguments
   int              m_interop;
-  unsigned int     m_tex;
-  unsigned int     m_pbo;
+//  unsigned int     m_tex;
+//  unsigned int     m_pbo;
 
   bool m_isValid;
 

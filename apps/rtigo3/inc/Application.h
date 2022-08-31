@@ -142,11 +142,15 @@ class Application
 {
 public:
 
-  Application(GLFWwindow* window, Options const& options);
+//  Application(GLFWwindow* window, Options const& options);
+  Application(Options const& options);
   ~Application();
 
+  GLFWwindow* glfwWindow();
+  int initializeGui(Options const& options);
+  void initializeRaytracer(Options const& options);
+  void initializeOptiX(Options const& options);
   bool isValid() const;
-
   void reshape(const int w, const int h);
   bool render();
   void benchmark();
@@ -210,9 +214,12 @@ private:
   int         m_light;       // "light"
   int         m_miss;        // "miss"
   std::string m_environment; // "envMap"
-  int         m_interop;     // "interop"�// 0 = none all through host, 1 = register texture image, 2 = register pixel buffer
+  int         m_interop;     // "interop"// 0 = none all through host, 1 = register texture image, 2 = register pixel buffer
   bool        m_present;     // "present"
-  
+
+  unsigned int m_tex;
+  unsigned int m_pbo;
+
   bool        m_presentNext;      // (derived)
   double      m_presentAtSecond;  // (derived)
   bool        m_previousComplete; // (derived) // Prevents spurious benchmark prints and image updates.

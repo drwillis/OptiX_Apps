@@ -148,6 +148,9 @@ void DeviceMultiGPUPeerAccess::render(const unsigned int iterationIndex, void** 
 
           CU_CHECK( cuGraphicsGLRegisterBuffer(&m_cudaGraphicsResource, m_pbo, CU_GRAPHICS_REGISTER_FLAGS_WRITE_DISCARD) ); 
           break;
+
+        case INTEROP_MODE_NONE:
+          break;
       }
     }
     else
@@ -244,6 +247,9 @@ void DeviceMultiGPUPeerAccess::updateDisplayTexture()
         glBindBuffer(GL_PIXEL_UNPACK_BUFFER, 0);
       }
       break;
+      case INTEROP_MODE_NONE:
+          synchronizeStream(); // Wait for rendering to finish
+          break;
   }
 }
 

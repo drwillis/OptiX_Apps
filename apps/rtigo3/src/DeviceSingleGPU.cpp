@@ -63,6 +63,8 @@ DeviceSingleGPU::DeviceSingleGPU(const RendererStrategy strategy,
       MY_ASSERT(m_pbo != 0);
       CU_CHECK( cuGraphicsGLRegisterBuffer(&m_cudaGraphicsResource, m_pbo, CU_GRAPHICS_REGISTER_FLAGS_NONE) );
       break;
+    case INTEROP_MODE_NONE:
+      break;
   }
 }
 
@@ -133,6 +135,11 @@ void DeviceSingleGPU::render(const unsigned int iterationIndex, void** /* buffer
         glBindBuffer(GL_PIXEL_UNPACK_BUFFER, 0);
         CU_CHECK( cuGraphicsGLRegisterBuffer(&m_cudaGraphicsResource, m_pbo, CU_GRAPHICS_REGISTER_FLAGS_NONE) );
         break;
+
+      case INTEROP_MODE_NONE:
+        CU_CHECK(cuMemFree(m_systemData.outputBuffer));
+        CU_CHECK(cuMemAlloc(reinterpret_cast<CUdeviceptr*> (&m_systemData.outputBuffer), sizeof (float4) * m_systemData.resolution.x * m_systemData.resolution.y));
+        break;
     }
 
     m_isDirtyOutputBuffer = false; // Buffer is allocated with new size,
@@ -158,6 +165,7 @@ void DeviceSingleGPU::render(const unsigned int iterationIndex, void** /* buffer
   {
     case INTEROP_MODE_OFF:
     case INTEROP_MODE_TEX:
+    case INTEROP_MODE_NONE:
       OPTIX_CHECK( m_api.optixLaunch(m_pipeline, m_cudaStream, reinterpret_cast<CUdeviceptr>(m_d_systemData), sizeof(SystemData), &m_sbt, m_systemData.resolution.x, m_systemData.resolution.y, /* depth */ 1) );
       break;
 
@@ -233,6 +241,9 @@ void DeviceSingleGPU::updateDisplayTexture()
       glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA32F, (GLsizei) m_systemData.resolution.x, (GLsizei) m_systemData.resolution.y, 0, GL_RGBA, GL_FLOAT, (GLvoid*) 0); // RGBA32F from byte offset 0 in the pixel unpack buffer.
       glBindBuffer(GL_PIXEL_UNPACK_BUFFER, 0);
       break;
+    case INTEROP_MODE_NONE:
+        synchronizeStream(); // Wait for rendering to finish
+        break;
   }
 }
 
@@ -246,6 +257,7 @@ const void* DeviceSingleGPU::getOutputBufferHost()
   {
     case INTEROP_MODE_OFF:
     case INTEROP_MODE_TEX:
+    case INTEROP_MODE_NONE:
       CU_CHECK( cuMemcpyDtoHAsync(m_bufferHost.data(), m_systemData.outputBuffer, sizeof(float4) * m_systemData.resolution.x * m_systemData.resolution.y, m_cudaStream) );
       synchronizeStream(); // Wait for the buffer to arrive on the host. Context is created with CU_CTX_SCHED_SPIN.
       break;

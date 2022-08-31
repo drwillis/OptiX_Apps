@@ -144,14 +144,22 @@ void DeviceMultiGPUZeroCopy::updateDisplayTexture()
   // All other devices have been synced by the RaytracerMultiGPUZeroCopy caller.
   activateContext();
   synchronizeStream(); // Wait for the buffer to arrive on the host. 
-  
-  MY_ASSERT(!m_isDirtyOutputBuffer && m_ownsSharedBuffer && m_tex != 0);
+    switch (m_interop)
+    {
+        case INTEROP_MODE_OFF:
+        case INTEROP_MODE_TEX:
+        case INTEROP_MODE_PBO:
+            MY_ASSERT(!m_isDirtyOutputBuffer && m_ownsSharedBuffer && m_tex != 0);
 
-  glActiveTexture(GL_TEXTURE0);
-  glBindTexture(GL_TEXTURE_2D, m_tex);
+            glActiveTexture(GL_TEXTURE0);
+            glBindTexture(GL_TEXTURE_2D, m_tex);
 
-  // RGBA32F from shared pinned memory host buffer data.
-  glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA32F, (GLsizei) m_systemData.resolution.x, (GLsizei) m_systemData.resolution.y, 0, GL_RGBA, GL_FLOAT, reinterpret_cast<GLvoid*>(m_systemData.outputBuffer));
+            // RGBA32F from shared pinned memory host buffer data.
+            glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA32F, (GLsizei) m_systemData.resolution.x, (GLsizei) m_systemData.resolution.y, 0, GL_RGBA, GL_FLOAT, reinterpret_cast<GLvoid*>(m_systemData.outputBuffer));
+            break;
+        case INTEROP_MODE_NONE:
+            break;
+    }
 }
 
 const void* DeviceMultiGPUZeroCopy::getOutputBufferHost()

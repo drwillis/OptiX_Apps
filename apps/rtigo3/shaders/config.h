@@ -59,8 +59,9 @@
 // 1 == Enable clock() usage and time view display.
 #define USE_TIME_VIEW 0
 
-#define INTEROP_MODE_OFF 0
-#define INTEROP_MODE_TEX 1
-#define INTEROP_MODE_PBO 2
+#define INTEROP_MODE_OFF  0
+#define INTEROP_MODE_TEX  1
+#define INTEROP_MODE_PBO  2
+#define INTEROP_MODE_NONE 3
 
 #endif // CONFIG_H

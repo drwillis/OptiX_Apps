@@ -46,39 +46,28 @@ static void callbackError(int error, const char* description)
 
 static int runApp(Options const& options)
 {
-  int width  = std::max(1, options.getWidth());
-  int height = std::max(1, options.getHeight());
- 
-  GLFWwindow* window = glfwCreateWindow(width, height, "rtigo3 - Copyright (c) 2020 NVIDIA Corporation", NULL, NULL);
-  if (!window)
-  {
-    callbackError(APP_ERROR_CREATE_WINDOW, "glfwCreateWindow() failed.");
-    return APP_ERROR_CREATE_WINDOW;
-  }
 
-  glfwMakeContextCurrent(window);
-
-  if (glewInit() != GL_NO_ERROR)
-  {
-    callbackError(APP_ERROR_GLEW_INIT, "GLEW failed to initialize.");
-    return APP_ERROR_GLEW_INIT;
-  }
-    
   ilInit(); // Initialize DevIL once.
 
-  g_app = new Application(window, options);
-
-  if (!g_app->isValid())
-  {
-    std::cerr << "ERROR: Application() failed to initialize successfully.\n";
-    ilShutDown();
-    return APP_ERROR_APP_INIT;
-  }
-
+//  g_app = new Application(window, options);
+  g_app = new Application(options);
   const int mode = std::max(0, options.getMode());
 
   if (mode == 0) // Interactive, default.
   {
+      g_app->initializeGui(options);
+      g_app->initializeRaytracer(options);
+      g_app->initializeOptiX(options);
+      if (!g_app->isValid())
+      {
+          std::cerr << "ERROR: Application() failed to initialize successfully.\n";
+          ilShutDown();
+          return APP_ERROR_APP_INIT;
+      }
+    GLFWwindow* window = g_app->glfwWindow();
+    int width  = std::max(1, options.getWidth());
+    int height = std::max(1, options.getHeight());
+
     // Main loop
     bool finish = false;
     while (!finish && !glfwWindowShouldClose(window))
@@ -103,6 +92,15 @@ static int runApp(Options const& options)
   }
   else if (mode == 1) // Batched benchmark single shot. // FIXME When not using anything OpenGL, the whole window and OpenGL setup could be removed.
   {
+      //g_app->initializeGui(options);
+      g_app->initializeRaytracer(options);
+      g_app->initializeOptiX(options);
+      if (!g_app->isValid())
+      {
+          std::cerr << "ERROR: Application() failed to initialize successfully.\n";
+          ilShutDown();
+          return APP_ERROR_APP_INIT;
+      }
     g_app->benchmark();
   }
 
