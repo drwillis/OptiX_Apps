@@ -154,7 +154,6 @@ struct DeviceAttribute
   int concurrentManagedAccess;
   int computePreemptionSupported;
   int canUseHostPointerForRegisteredMem;
-  int canUseStreamMemOps;
   int canUse64BitStreamMemOps;
   int canUseStreamWaitValueNor;
   int cooperativeLaunch;
@@ -195,6 +194,22 @@ struct SbtRecordData
 };
 
 typedef SbtRecordData<GeometryInstanceData> SbtRecordGeometryInstanceData;
+
+
+enum ModuleIdentifier
+{
+  MODULE_ID_RAYGENERATION,
+  MODULE_ID_EXCEPTION,
+  MODULE_ID_MISS,
+  MODULE_ID_CLOSESTHIT,
+  MODULE_ID_ANYHIT,
+  MODULE_ID_LENS_SHADER,
+  MODULE_ID_LIGHT_SAMPLE,
+  MODULE_ID_BXDF_DIFFUSE,
+  MODULE_ID_BXDF_SPECULAR,
+  MODULE_ID_BXDF_GGX_SMITH,
+  NUM_MODULE_IDENTIFIERS
+};
 
 
 enum ProgramGroupId
@@ -262,8 +277,12 @@ struct GeometryData
   size_t                   numAttributes; // Count of attributes structs.
   size_t                   numIndices;    // Count of unsigned int indices (not triplets for triangles).
   CUdeviceptr              d_gas;         // The geometry AS for the traversable handle.
-  OptixAccelRelocationInfo info;          // The relocation info allows to check if the AS is compatible across OptiX contexts. 
+#if (OPTIX_VERSION >= 70600)
+  OptixRelocationInfo      info;          // The relocation info allows to check if the AS is compatible across OptiX contexts. 
                                           // (In the NVLINK case that isn't really required, because the GPU configuration must be homogeneous inside an NVLINK island.)
+#else
+  OptixAccelRelocationInfo info;
+#endif
 };
 
 struct InstanceData
@@ -378,6 +397,8 @@ public:
   OptixFunctionTable m_api;
   OptixDeviceContext m_optixContext;
   
+  std::vector<std::string> m_moduleFilenames;
+
   OptixPipeline m_pipeline;
   
   OptixShaderBindingTable m_sbt;

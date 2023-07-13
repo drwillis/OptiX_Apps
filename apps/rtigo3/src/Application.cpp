@@ -94,7 +94,7 @@ m_window(nullptr)
     m_mapKeywordScene["scale"]           = KS_SCALE;
     m_mapKeywordScene["translate"]       = KS_TRANSLATE;
     m_mapKeywordScene["model"]           = KS_MODEL;
-    
+
     const double timeConstructor = m_timer.getTime();
     
     // Gobal commandline parameters:
@@ -131,29 +131,14 @@ m_window(nullptr)
       return; // m_isValid == false.
     }
 
-//    // The user interface is part of the main application.
-//    // Setup ImGui binding.
-////    ImGui::CreateContext();
-////    ImGui_ImplGlfwGL3_Init(window, true);
+    // The user interface is part of the main application.
+    // Setup ImGui binding.
+//    ImGui::CreateContext();
+//    ImGui_ImplGlfwGL3_Init(window, true);
 //
-//    // This initializes the GLFW part including the font texture.
-////    ImGui_ImplGlfwGL3_NewFrame();
-////    ImGui::EndFrame();
-//      // The user interface is part of the main application.
-//      // Setup ImGui binding.
-//      ImGui::CreateContext();
-//      //ImGui_ImplOpenGL2_Init();
-//      ImGui_ImplOpenGL3_Init();
-//      ImGui_ImplGlfw_InitForOpenGL(window, true);
-//      //ImGui_ImplGlfwGL3_Init(window, true);
-//
-//      // This initializes the GLFW part including the font texture.
-//      //ImGui_ImplOpenGL2_NewFrame();
-//      ImGui_ImplOpenGL3_NewFrame();
-//      ImGui_ImplGlfw_NewFrame();
-//      ImGui::NewFrame();
-//      //ImGui_ImplGlfwGL3_NewFrame();
-//      ImGui::EndFrame();
+    // This initializes the GLFW part including the font texture.
+//    ImGui_ImplGlfwGL3_NewFrame();
+//    ImGui::EndFrame();
 #if 0
     // Style the GUI colors to a neutral greyscale with plenty of transparency to concentrate on the image.
     ImGuiStyle& style = ImGui::GetStyle();
@@ -337,7 +322,7 @@ m_window(nullptr)
 //
 //    const double timeRenderer = m_timer.getTime();
 //
-//    // Print out hiow long the initialization of each module took.
+//    // Print out how long the initialization of each module took.
 //    std::cout << "Application(): " << timeRenderer - timeConstructor   << " seconds overall\n";
 //    std::cout << "{\n";
 //    std::cout << "  GUI        = " << timeGUI        - timeConstructor << " seconds\n";
@@ -423,10 +408,10 @@ int Application::initializeGui(Options const& options) {
 
     // Initialize the OpenGL rasterizer.
     m_rasterizer = std::make_unique<Rasterizer>(m_width, m_height, m_interop);
-
-    // Must set the resolution explicitly to be able to calculate
+    
+    // Must set the resolution explicitly to be able to calculate 
     // the proper vertex attributes for display and the PBO size in case of interop.
-    m_rasterizer->setResolution(m_resolution.x, m_resolution.y);
+    m_rasterizer->setResolution(m_resolution.x, m_resolution.y); 
     m_rasterizer->setTonemapper(m_tonemapperGUI);
 
     //const unsigned int m_tex = m_rasterizer->getTextureObject();
@@ -442,30 +427,30 @@ void Application::initializeRaytracer(Options const& options) {
     const unsigned int tex = m_tex;
     const unsigned int pbo = m_pbo;
     // Initialize the OptiX raytracer.
-    switch (m_strategy) // The strategy is limited to valid enums by the caller
+    switch (m_strategy) // The strategy is limited to valid enums by the caller 
     {
-        case RS_INTERACTIVE_SINGLE_GPU:
-            m_raytracer = std::make_unique<RaytracerSingleGPU>(m_devicesMask, m_miss, m_interop, tex, pbo);
-            break;
+      case RS_INTERACTIVE_SINGLE_GPU:
+        m_raytracer = std::make_unique<RaytracerSingleGPU>(m_devicesMask, m_miss, m_interop, tex, pbo);
+        break;
 
-        case RS_INTERACTIVE_MULTI_GPU_ZERO_COPY:
-            m_raytracer = std::make_unique<RaytracerMultiGPUZeroCopy>(m_devicesMask, m_miss, m_interop, tex, pbo);
-            break;
+      case RS_INTERACTIVE_MULTI_GPU_ZERO_COPY:
+        m_raytracer = std::make_unique<RaytracerMultiGPUZeroCopy>(m_devicesMask, m_miss, m_interop, tex, pbo);
+        break;
 
-        case RS_INTERACTIVE_MULTI_GPU_PEER_ACCESS:
-            m_raytracer = std::make_unique<RaytracerMultiGPUPeerAccess>(m_devicesMask, m_miss, m_interop, tex, pbo);
-            break;
+      case RS_INTERACTIVE_MULTI_GPU_PEER_ACCESS:
+        m_raytracer = std::make_unique<RaytracerMultiGPUPeerAccess>(m_devicesMask, m_miss, m_interop, tex, pbo);
+        break;
 
-        case RS_INTERACTIVE_MULTI_GPU_LOCAL_COPY:
-            m_raytracer = std::make_unique<RaytracerMultiGPULocalCopy>(m_devicesMask, m_miss, m_interop, tex, pbo);
-            break;
+      case RS_INTERACTIVE_MULTI_GPU_LOCAL_COPY:
+        m_raytracer = std::make_unique<RaytracerMultiGPULocalCopy>(m_devicesMask, m_miss, m_interop, tex, pbo);
+        break;
     }
 
     // If the raytracer could not be initialized correctly, return and leave Application invalid.
     if (!m_raytracer->m_isValid)
     {
-        std::cerr << "ERROR: Application() Could not initialize Raytracer with strategy = " << m_strategy << '\n';
-        return; // Exit application.
+      std::cerr << "ERROR: Application() Could not initialize Raytracer with strategy = " << m_strategy << '\n';
+      return; // Exit application.
     }
 
     // Determine which device is the one running the OpenGL implementation.
@@ -484,12 +469,12 @@ void Application::initializeRaytracer(Options const& options) {
 #else
     // LUID only works under Windows because it requires the EXT_external_objects_win32 extension.
     // DEBUG With multicast enabled, both devices have the same LUID and the OpenGL node mask is the OR of the individual device node masks.
-    // Means the result of the deviceMatch here is depending on the CUDA device order.
+    // Means the result of the deviceMatch here is depending on the CUDA device order. 
     // Seems like multicast needs to handle CUDA - OpenGL interop differently.
     // With multicast enabled, uploading the PBO with glTexImage2D halves the framerate when presenting each image in both the single-GPU and multi-GPU P2P strategy.
     // Means there is an expensive PCI-E copy going on in that case.
     const unsigned char* luid = m_rasterizer->getLUID();
-    const int nodeMask        = m_rasterizer->getNodeMask();
+    const int nodeMask        = m_rasterizer->getNodeMask(); 
 
     // The cuDeviceGetLuid() takes char* and unsigned int though.
     deviceMatch = m_raytracer->matchLUID(reinterpret_cast<const char*>(luid), nodeMask);
@@ -497,15 +482,15 @@ void Application::initializeRaytracer(Options const& options) {
 
     if (deviceMatch == -1)
     {
-        if (m_interop == INTEROP_MODE_TEX)
-        {
-            std::cerr << "ERROR: Application() OpenGL texture image interop without OpenGL device in active devices will not display the image!\n";
-            return; // Exit application.
-        }
-        if (m_interop == INTEROP_MODE_PBO)
-        {
-            std::cerr << "WARNING: Application() OpenGL pixel buffer interop without OpenGL device in active devices will result in reduced performance!\n";
-        }
+      if (m_interop == INTEROP_MODE_TEX)
+      {
+        std::cerr << "ERROR: Application() OpenGL texture image interop without OpenGL device in active devices will not display the image!\n";
+        return; // Exit application.
+      }
+      if (m_interop == INTEROP_MODE_PBO)
+      {
+        std::cerr << "WARNING: Application() OpenGL pixel buffer interop without OpenGL device in active devices will result in reduced performance!\n";
+      }
     }
 }
 
@@ -530,14 +515,14 @@ void Application::initializeOptiX(Options const& options) {
     createPictures();
     createCameras();
     createLights();
-
+    
     // Load the scene description file and generate the host side scene.
     const std::string filenameScene = options.getScene();
     if (!loadSceneDescription(filenameScene))
     {
-        std::cerr << "ERROR: Application() failed to load scene description file " << filenameScene << '\n';
-        MY_ASSERT(!"Failed to load scene description");
-        return;
+      std::cerr << "ERROR: Application() failed to load scene description file " << filenameScene << '\n';
+      MY_ASSERT(!"Failed to load scene description");
+      return;
     }
 
     MY_ASSERT(m_idGeometry == m_geometries.size());
@@ -550,7 +535,7 @@ void Application::initializeOptiX(Options const& options) {
     m_raytracer->initLights(m_lights);
     m_raytracer->initMaterials(m_materialsGUI);
     m_raytracer->initScene(m_scene, m_idGeometry); // m_idGeometry is the number of geometries in the scene.
-
+    
     const double timeRenderer = m_timer.getTime();
 
     // Print out hiow long the initialization of each module took.
@@ -767,7 +752,7 @@ void Application::createPictures()
   m_mapPictures[std::string("albedo")] = picture; // The map owns the pointers.
 
   picture = new Picture();
-  picture->load(std::string("./slots_alpha.png"), flags);
+  picture->load(std::string("./slots_rgba.png"), flags);
   m_mapPictures[std::string("cutout")] = picture;
 
   if (m_miss == 2 && !m_environment.empty())
@@ -995,6 +980,7 @@ void Application::guiWindow()
   bool refresh = false;
 
   ImGui::SetNextWindowSize(ImVec2(200, 200), ImGuiCond_FirstUseEver);
+//  ImGui::SetNextWindowSize(ImVec2(200, 200), ImGuiSetCond_FirstUseEver);
 
   ImGuiWindowFlags window_flags = 0;
   if (!ImGui::Begin("rtigo3", nullptr, window_flags)) // No bool flag to omit the close button.
@@ -1082,6 +1068,7 @@ void Application::guiWindow()
       changed = true;
     }
     if (ImGui::DragFloat("White Point", &m_tonemapperGUI.whitePoint, 0.01f, 0.01f, 255.0f, "%.2f", ImGuiSliderFlags_Logarithmic)) // Must not get 0.0f
+//    if (ImGui::DragFloat("White Point", &m_tonemapperGUI.whitePoint, 0.01f, 0.01f, 255.0f, "%.2f", 2.0f)) // Must not get 0.0f
     {
       changed = true;
     }
@@ -1098,6 +1085,7 @@ void Application::guiWindow()
       changed = true;
     }
     if (ImGui::DragFloat("Brightness", &m_tonemapperGUI.brightness, 0.01f, 0.0f, 100.0f, "%.2f", ImGuiSliderFlags_Logarithmic))
+//    if (ImGui::DragFloat("Brightness", &m_tonemapperGUI.brightness, 0.01f, 0.0f, 100.0f, "%.2f", 2.0f))
     {
       changed = true;
     }
@@ -1218,7 +1206,7 @@ void Application::guiWindow()
 
 void Application::guiRenderingIndicator(const bool isRendering)
 {
-    if (!m_window) return;
+  if (!m_window) return;
   // NVIDIA Green when rendering is complete.
   float r = 0.462745f;
   float g = 0.72549f;

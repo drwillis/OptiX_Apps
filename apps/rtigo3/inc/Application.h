@@ -35,22 +35,6 @@
 // (CMake uses the CUDA_CUDA_LIBRARY which is nvcuda.lib. At runtime that loads nvcuda.dll from the driver.)
 //#include <cuda.h>
 
-//#if defined(_WIN32)
-//#ifndef WIN32_LEAN_AND_MEAN
-//#define WIN32_LEAN_AND_MEAN 1
-//#endif
-//#include <windows.h>
-//#endif
-//
-//#include "imgui.h"
-//#define IMGUI_DEFINE_MATH_OPERATORS 1
-//#include "imgui_internal.h"
-//#include "imgui_impl_glfw_gl3.h"
-//
-//#include <GL/glew.h>
-//#if defined( _WIN32 )
-//#include <GL/wglew.h>
-//#endif
 #if defined(_WIN32)
 #ifndef WIN32_LEAN_AND_MEAN
 #define WIN32_LEAN_AND_MEAN 1
@@ -71,9 +55,6 @@
 #if defined( _WIN32 )
 #include <GL/wglew.h>
 #endif
-
-// This include gl.h and needs to be done after glew.h
-#include <GLFW/glfw3.h>
 
 #include "inc/Camera.h"
 #include "inc/Options.h"
@@ -151,6 +132,7 @@ public:
   void initializeRaytracer(Options const& options);
   void initializeOptiX(Options const& options);
   bool isValid() const;
+
   void reshape(const int w, const int h);
   bool render();
   void benchmark();

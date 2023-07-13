@@ -34,7 +34,7 @@ devicesMask 1
 #     Not available with multi-GPU zero copy strategy because the buffer resides in host memory then.
 #     For multi-GPU peer access the renderer cannot directly render with peer-to-peer into the OpenGL PBO and needs a separate shared buffer for rendering.
 
-interop 1
+interop 0
 
 # Controls if every rendered image or final tile should be displayed (1) or only once per second (0) to save PCI-E bandwidth.
 # 0 = present only once per second (except for the first half second which accumulates)

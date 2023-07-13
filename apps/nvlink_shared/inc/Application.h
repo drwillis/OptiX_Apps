@@ -35,22 +35,6 @@
 // (CMake uses the CUDA_CUDA_LIBRARY which is nvcuda.lib. At runtime that loads nvcuda.dll from the driver.)
 //#include <cuda.h>
 
-//#if defined(_WIN32)
-//#ifndef WIN32_LEAN_AND_MEAN
-//#define WIN32_LEAN_AND_MEAN 1
-//#endif
-//#include <windows.h>
-//#endif
-//
-//#include "imgui.h"
-//#define IMGUI_DEFINE_MATH_OPERATORS 1
-//#include "imgui_internal.h"
-//#include "imgui_impl_glfw_gl3.h"
-//#include "backends/imgui_impl_glfw.h"
-//#include <GL/glew.h>
-//#if defined( _WIN32 )
-//#include <GL/wglew.h>
-//#endif
 #if defined(_WIN32)
 #ifndef WIN32_LEAN_AND_MEAN
 #define WIN32_LEAN_AND_MEAN 1
@@ -71,9 +55,6 @@
 #if defined( _WIN32 )
 #include <GL/wglew.h>
 #endif
-
-// This include gl.h and needs to be done after glew.h
-#include <GLFW/glfw3.h>
 
 #include "inc/Camera.h"
 #include "inc/Options.h"
@@ -214,7 +195,7 @@ private:
   int         m_miss;        // "miss"
   std::string m_environment; // "envMap"
   int         m_interop;     // "interop"     // 0 = none all through host, 1 = register texture image, 2 = register pixel buffer
-  int         m_peerToPeer;  // "peerToPeer   // Bitfield controlling P2P resource sharing: 
+  int         m_peerToPeer;  // "peerToPeer"  // Bitfield controlling P2P resource sharing: 
                                               // Bit 0 = Ignored in this application.
                                               // Bit 1 = Share material textures (very cheap) (default on)
                                               // Bit 2 = Share GAS and vertex attributes (very expensive) (default on)

@@ -19,7 +19,7 @@ cmake_minimum_required(VERSION 3.17 FATAL_ERROR)
 
 ##################################################################
 # device_include processing
-
+set(CMAKE_POLICY_DEFAULT_CMP0077 NEW)
 set(ASSIMP_BUILD_ASSIMP_TOOLS OFF)
 set(ASSIMP_BUILD_TESTS OFF)
 #set(ASSIMP_INSTALL OFF)
@@ -90,7 +90,7 @@ endif (BUILD_WITH_GUI)
 # glew always appends "d" for libraries built in debug Release which creates build problems
 #SET(CMAKE_BUILD_TYPE_TEMP ${CMAKE_BUILD_TYPE})
 #SET(CMAKE_BUILD_TYPE "Release")
-set(ONLY_LIBS ON)
+#set(ONLY_LIBS ON)
 add_subdirectory(glew-cmake)
 #SET(CMAKE_BUILD_TYPE ${CMAKE_BUILD_TYPE_TEMP})
 

@@ -101,7 +101,7 @@ Application::Application(GLFWwindow* window, const Options& options)
     m_optimize = options.getOptimize();
 
     // Initialize the system options to minimum defaults to work, but require useful settings inside the system options file.
-    // The minumum path length values will generate useful direct lighting results, but transmissions will be mostly black.
+    // The minimum path length values will generate useful direct lighting results, but transmissions will be mostly black.
     m_resolution  = make_int2(1, 1);
     m_tileSize    = make_int2(8, 8);
     m_pathLengths = make_int2(0, 2);
@@ -145,12 +145,6 @@ Application::Application(GLFWwindow* window, const Options& options)
     ImGui::NewFrame();
     //ImGui_ImplGlfwGL3_NewFrame();
     ImGui::EndFrame();
-
-//    ImGui_ImplGlfwGL3_Init(window, true);
-//
-//    // This initializes the GLFW part including the font texture.
-//    ImGui_ImplGlfwGL3_NewFrame();
-//    ImGui::EndFrame();
 
 #if 0
     // Style the GUI colors to a neutral greyscale with plenty of transparency to concentrate on the image.
@@ -758,6 +752,7 @@ void Application::guiWindow()
   bool refresh = false;
 
   ImGui::SetNextWindowSize(ImVec2(200, 200), ImGuiCond_FirstUseEver);
+//  ImGui::SetNextWindowSize(ImVec2(200, 200), ImGuiSetCond_FirstUseEver);
 
   ImGuiWindowFlags window_flags = 0;
   if (!ImGui::Begin("nvlink_shared", nullptr, window_flags)) // No bool flag to omit the close button.

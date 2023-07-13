@@ -31,8 +31,9 @@
 #ifndef APPLICATION_H
 #define APPLICATION_H
 
-// DAR This version of the renderer only uses the CUDA Driver API!
+// This version of the renderer only uses the CUDA Driver API!
 // (CMake uses the CUDA_CUDA_LIBRARY which is nvcuda.lib. At runtime that loads nvcuda.dll from the driver.)
+// Always include this before any OptiX headers!
 #include <cuda.h>
 //#include <cuda_runtime.h>
 
@@ -41,32 +42,12 @@
 // OptiX 7 function table structure.
 #include <optix_function_table.h>
 
-//#if defined(_WIN32)
-//
-//#ifndef WIN32_LEAN_AND_MEAN
-//#define WIN32_LEAN_AND_MEAN 1
-//#endif
-//
-//#include <windows.h>
-//#endif
-//
-//#include "imgui.h"
-//
-//#define IMGUI_DEFINE_MATH_OPERATORS 1
-//#include "imgui_internal.h"
-//
-//#include "imgui_impl_glfw_gl3.h"
-//
-//#ifndef __APPLE__
-//#  include <GL/glew.h>
-//#  if defined( _WIN32 )
-//#    include <GL/wglew.h>
-//#  endif
-//#endif
 #if defined(_WIN32)
+
 #ifndef WIN32_LEAN_AND_MEAN
 #define WIN32_LEAN_AND_MEAN 1
 #endif
+
 #include <windows.h>
 #endif
 
@@ -79,9 +60,11 @@
 #include <imgui/backends/imgui_impl_glfw.h>
 #include <imgui/backends/imgui_impl_opengl3.h>
 
-#include <GL/glew.h>
-#if defined( _WIN32 )
-#include <GL/wglew.h>
+#ifndef __APPLE__
+#  include <GL/glew.h>
+#  if defined( _WIN32 )
+#    include <GL/wglew.h>
+#  endif
 #endif
 
 // Needs to be included after OpenGL headers!
@@ -167,6 +150,49 @@ struct GeometryData
   size_t      numAttributes; // Count of VertexAttributes structs.
   CUdeviceptr gas;
 };
+
+
+enum ModuleIdentifier
+{
+  MODULE_ID_RAYGENERATION,
+  MODULE_ID_EXCEPTION,
+  MODULE_ID_MISS,
+  MODULE_ID_CLOSESTHIT,
+  MODULE_ID_ANYHIT,
+  MODULE_ID_LENS_SHADER,
+  MODULE_ID_LIGHT_SAMPLE,
+  MODULE_ID_DIFFUSE_REFLECTION,
+  MODULE_ID_SPECULAR_REFLECTION,
+  MODULE_ID_SPECULAR_REFLECTION_TRANSMISSION,
+  NUM_MODULE_IDENTIFIERS
+};
+
+
+enum ProgramIdentifier
+{
+  PROGRAM_ID_RAYGENERATION,
+  PROGRAM_ID_EXCEPTION,
+  PROGRAM_ID_MISS_RADIANCE,
+  PROGRAM_ID_MISS_SHADOW,
+  PROGRAM_ID_HIT_RADIANCE,
+  PROGRAM_ID_HIT_SHADOW,
+  PROGRAM_ID_HIT_RADIANCE_CUTOUT,
+  PROGRAM_ID_HIT_SHADOW_CUTOUT,
+  // Callables
+  PROGRAM_ID_LENS_PINHOLE,
+  PROGRAM_ID_LENS_FISHEYE,
+  PROGRAM_ID_LENS_SPHERE,
+  PROGRAM_ID_LIGHT_ENV,
+  PROGRAM_ID_LIGHT_PARALLELOGRAM,
+  PROGRAM_ID_BRDF_DIFFUSE_SAMPLE,
+  PROGRAM_ID_BRDF_DIFFUSE_EVAL,
+  PROGRAM_ID_BRDF_SPECULAR_SAMPLE,
+  PROGRAM_ID_BRDF_SPECULAR_EVAL,
+  PROGRAM_ID_BSDF_SPECULAR_SAMPLE,
+  PROGRAM_ID_BSDF_SPECULAR_EVAL,
+  NUM_PROGRAM_IDENTIFIERS
+};
+
 
 struct DeviceAttribute
 {
@@ -266,7 +292,6 @@ struct DeviceAttribute
   int concurrentManagedAccess;
   int computePreemptionSupported;
   int canUseHostPointerForRegisteredMem;
-  int canUseStreamMemOps;
   int canUse64BitStreamMemOps;
   int canUseStreamWaitValueNor;
   int cooperativeLaunch;
@@ -330,7 +355,7 @@ private:
 
   void restartAccumulation();
 
-  std::string readPTX(std::string const& filename);
+  std::vector<char> readData(std::string const& filename);
 
   void updateShaderBindingTable(const int instance);
 
@@ -452,6 +477,8 @@ private:
   OptixSRTMotionTransform m_srtMotionTransform;
   CUdeviceptr             m_d_srtMotionTransform;
   OptixTraversableHandle  m_srtMotionTransformHandle;
+
+  std::vector<std::string> m_moduleFilenames;
 
   // API Reference sidenote on optixLaunch (doesn't apply for this example):
   // Concurrent launches to multiple streams require separate OptixPipeline objects. 

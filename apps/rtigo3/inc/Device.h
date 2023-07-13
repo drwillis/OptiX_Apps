@@ -162,7 +162,6 @@ struct DeviceAttribute
   int concurrentManagedAccess;
   int computePreemptionSupported;
   int canUseHostPointerForRegisteredMem;
-  int canUseStreamMemOps;
   int canUse64BitStreamMemOps;
   int canUseStreamWaitValueNor;
   int cooperativeLaunch;
@@ -203,6 +202,22 @@ struct SbtRecordData
 };
 
 typedef SbtRecordData<GeometryInstanceData> SbtRecordGeometryInstanceData;
+
+
+enum ModuleIdentifier
+{
+  MODULE_ID_RAYGENERATION,
+  MODULE_ID_EXCEPTION,
+  MODULE_ID_MISS,
+  MODULE_ID_CLOSESTHIT,
+  MODULE_ID_ANYHIT,
+  MODULE_ID_LENS_SHADER,
+  MODULE_ID_LIGHT_SAMPLE,
+  MODULE_ID_BXDF_DIFFUSE,
+  MODULE_ID_BXDF_SPECULAR,
+  MODULE_ID_BXDF_GGX_SMITH,
+  NUM_MODULE_IDENTIFIERS
+};
 
 
 enum ProgramGroupId
@@ -366,6 +381,8 @@ public:
   OptixFunctionTable m_api;
   OptixDeviceContext m_optixContext;
   
+  std::vector<std::string> m_moduleFilenames;
+
   OptixPipeline m_pipeline;
   
   OptixShaderBindingTable m_sbt;
