@@ -1,4 +1,4 @@
-/*
+/* 
  * Copyright (c) 2013-2020, NVIDIA CORPORATION. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -27,12 +27,9 @@
  */
 
 #include "inc/Application.h"
+#include "inc/LoaderIES.h"
 #include "inc/Parser.h"
-
-#include "inc/RaytracerSingleGPU.h"
-#include "inc/RaytracerMultiGPUZeroCopy.h"
-#include "inc/RaytracerMultiGPUPeerAccess.h"
-#include "inc/RaytracerMultiGPULocalCopy.h"
+#include "inc/Raytracer.h"
 
 #include <algorithm>
 #include <fstream>
@@ -47,8 +44,9 @@
 
 #include "inc/MyAssert.h"
 
-Application::Application(Options const& options)
-: //m_window(window)
+//Application::Application(GLFWwindow* window, const Options& options)
+Application::Application(const Options& options)
+:// m_window(window)
 m_window(nullptr)
 , m_isValid(false)
 , m_guiState(GUI_STATE_NONE)
@@ -56,20 +54,19 @@ m_window(nullptr)
 , m_width(512)
 , m_height(512)
 , m_mode(0)
-, m_strategy(RS_INTERACTIVE_SINGLE_GPU)
-, m_devicesMask(255)
-, m_light(0)
-, m_miss(1)
+, m_maskDevices(0x00FFFFFF) // A maximum of 24 devices is supported by default. Limited by the UUID arrays 
+, m_sizeArena(64) // Default to 64 MiB Arenas when nothing is specified inside the system description.
 , m_interop(0)
+, m_peerToPeer(P2P_TEX | P2P_GAS) // Enable material texture and GAS sharing via NVLINK only by default.
 , m_present(false)
 , m_presentNext(true)
 , m_presentAtSecond(1.0)
 , m_previousComplete(false)
-, m_lensShader(LENS_SHADER_PINHOLE)
+, m_typeLens(TYPE_LENS_PINHOLE)
 , m_samplesSqrt(1)
 , m_epsilonFactor(500.0f)
-, m_environmentRotation(0.0f)
 , m_clockFactor(1000.0f)
+, m_useDirectLighting(true)
 , m_mouseSpeedRatio(10.0f)
 , m_idGroup(0)
 , m_idInstance(0)
@@ -78,60 +75,74 @@ m_window(nullptr)
   try
   {
     m_timer.restart();
-    
+
     // Initialize the top-level keywords of the scene description for faster search.
+    
+    // Camera parameters 
+    // These can be set in either the system or scene description. Latter takes precedence.
+    m_mapKeywordScene["lensShader"] = KS_LENS_SHADER;
+    m_mapKeywordScene["center"]     = KS_CENTER; // Center of interest.
+    m_mapKeywordScene["camera"]     = KS_CAMERA; // Camere location, polar orientation, field of view.
+    // Tonemapper parameters
+    // These can be set in either the system or scene description. Latter takes precedence.
+    m_mapKeywordScene["gamma"]          = KS_GAMMA;
+    m_mapKeywordScene["colorBalance"]   = KS_COLOR_BALANCE;
+    m_mapKeywordScene["whitePoint"]     = KS_WHITE_POINT;
+    m_mapKeywordScene["burnHighlights"] = KS_BURN_HIGHLIGHTS;
+    m_mapKeywordScene["crushBlacks"]    = KS_CRUSH_BLACKS;
+    m_mapKeywordScene["saturation"]     = KS_SATURATION;
+    m_mapKeywordScene["brightness"]     = KS_BRIGHTNESS;
+    // Material parameters
     m_mapKeywordScene["albedo"]          = KS_ALBEDO;
+    m_mapKeywordScene["albedoTexture"]   = KS_ALBEDO_TEXTURE;
+    m_mapKeywordScene["cutoutTexture"]   = KS_CUTOUT_TEXTURE;
     m_mapKeywordScene["roughness"]       = KS_ROUGHNESS;
     m_mapKeywordScene["absorption"]      = KS_ABSORPTION;
     m_mapKeywordScene["absorptionScale"] = KS_ABSORPTION_SCALE;
     m_mapKeywordScene["ior"]             = KS_IOR;
     m_mapKeywordScene["thinwalled"]      = KS_THINWALLED;
-    m_mapKeywordScene["material"]        = KS_MATERIAL;
-    m_mapKeywordScene["identity"]        = KS_IDENTITY;
-    m_mapKeywordScene["push"]            = KS_PUSH;
-    m_mapKeywordScene["pop"]             = KS_POP;
-    m_mapKeywordScene["rotate"]          = KS_ROTATE;
-    m_mapKeywordScene["scale"]           = KS_SCALE;
-    m_mapKeywordScene["translate"]       = KS_TRANSLATE;
-    m_mapKeywordScene["model"]           = KS_MODEL;
+    // Emission parameters
+    m_mapKeywordScene["emission"]           = KS_EMISSION;
+    m_mapKeywordScene["emissionMultiplier"] = KS_EMISSION_MULTIPLIER;
+    m_mapKeywordScene["emissionProfile"]    = KS_EMISSION_PROFILE;
+    m_mapKeywordScene["emissionTexture"]    = KS_EMISSION_TEXTURE;
+    m_mapKeywordScene["spotAngle"]          = KS_SPOT_ANGLE;
+    m_mapKeywordScene["spotExponent"]       = KS_SPOT_EXPONENT;
+    // Transformations
+    m_mapKeywordScene["identity"]  = KS_IDENTITY;
+    m_mapKeywordScene["push"]      = KS_PUSH;
+    m_mapKeywordScene["pop"]       = KS_POP;
+    m_mapKeywordScene["rotate"]    = KS_ROTATE;
+    m_mapKeywordScene["scale"]     = KS_SCALE;
+    m_mapKeywordScene["translate"] = KS_TRANSLATE;
+    // BXDFs
+    m_mapKeywordScene["bxdf"]           = KS_BXDF;
+    m_mapKeywordScene["brdf_diffuse"]   = KS_BRDF_DIFFUSE;
+    m_mapKeywordScene["brdf_specular"]  = KS_BRDF_SPECULAR;
+    m_mapKeywordScene["bsdf_specular"]  = KS_BSDF_SPECULAR;
+    m_mapKeywordScene["brdf_ggx_smith"] = KS_BRDF_GGX_SMITH;
+    m_mapKeywordScene["bsdf_ggx_smith"] = KS_BSDF_GGX_SMITH;
+    // EDFs
+    m_mapKeywordScene["edf"]         = KS_EDF;
+    m_mapKeywordScene["edf_diffuse"] = KS_EDF_DIFFUSE;
+    m_mapKeywordScene["edf_spot"]    = KS_EDF_SPOT;
+    m_mapKeywordScene["edf_ies"]     = KS_EDF_IES;
+    // Models
+    m_mapKeywordScene["plane"]  = KS_PLANE;
+    m_mapKeywordScene["box"]    = KS_BOX;
+    m_mapKeywordScene["sphere"] = KS_SPHERE;
+    m_mapKeywordScene["torus"]  = KS_TORUS;
+    m_mapKeywordScene["assimp"] = KS_ASSIMP;
+    // Predefined light types
+    m_mapKeywordScene["env"]  = KS_LIGHT_ENV;
+    m_mapKeywordScene["rect"] = KS_LIGHT_RECT;
+    // Scene elements
+    m_mapKeywordScene["material"] = KS_MATERIAL;
+    m_mapKeywordScene["light"]    = KS_LIGHT;
+    m_mapKeywordScene["model"]    = KS_MODEL;
 
-    const double timeConstructor = m_timer.getTime();
-    
-    // Gobal commandline parameters:
-    m_width    = std::max(1, options.getWidth());
-    m_height   = std::max(1, options.getHeight());
-    m_mode     = std::max(0, options.getMode());
-    m_optimize = options.getOptimize();
+    // ===== IMGUI INTERFACE
 
-    // Initialize the system options to minimum defaults to work, but require useful settings inside the system options file.
-    // The minimum path length values will generate useful direct lighting results, but transmissions will be mostly black.
-    m_resolution  = make_int2(1, 1);
-    m_tileSize    = make_int2(8, 8);
-    m_pathLengths = make_int2(0, 2);
-
-    m_prefixScreenshot = std::string("./img"); // Default to current working directory and prefix "img".
-
-    // Tonemapper neutral defaults. The system description overrides these.
-    m_tonemapperGUI.gamma           = 1.0f;
-    m_tonemapperGUI.whitePoint      = 1.0f;
-    m_tonemapperGUI.colorBalance[0] = 1.0f;
-    m_tonemapperGUI.colorBalance[1] = 1.0f;
-    m_tonemapperGUI.colorBalance[2] = 1.0f;
-    m_tonemapperGUI.burnHighlights  = 1.0f;
-    m_tonemapperGUI.crushBlacks     = 0.0f;
-    m_tonemapperGUI.saturation      = 1.0f; 
-    m_tonemapperGUI.brightness      = 1.0f;
-
-    // System wide parameters are loaded from this file to keep the number of command line options small.
-    const std::string filenameSystem = options.getSystem();
-    if (!loadSystemDescription(filenameSystem))
-    {
-      std::cerr << "ERROR: Application() failed to load system description file " << filenameSystem << '\n';
-      MY_ASSERT(!"Failed to load system description");
-      return; // m_isValid == false.
-    }
-
-    // The user interface is part of the main application.
     // Setup ImGui binding.
 //    ImGui::CreateContext();
 //    ImGui_ImplGlfwGL3_Init(window, true);
@@ -139,6 +150,7 @@ m_window(nullptr)
     // This initializes the GLFW part including the font texture.
 //    ImGui_ImplGlfwGL3_NewFrame();
 //    ImGui::EndFrame();
+
 #if 0
     // Style the GUI colors to a neutral greyscale with plenty of transparency to concentrate on the image.
     ImGuiStyle& style = ImGui::GetStyle();
@@ -194,12 +206,76 @@ m_window(nullptr)
     style.Colors[ImGuiCol_NavHighlight]          = ImVec4(r * 1.0f, g * 1.0f, b * 1.0f, 1.0f);
     style.Colors[ImGuiCol_NavWindowingHighlight] = ImVec4(r * 1.0f, g * 1.0f, b * 1.0f, 1.0f);
 #endif
-  
-    const double timeGUI = m_timer.getTime();
 
+    // ===== SYSTEM DESCRIPTION
+
+    m_width  = std::max(1, options.getWidth());
+    m_height = std::max(1, options.getHeight());
+    m_mode   = std::max(0, options.getMode());
+    m_optimize = options.getOptimize();
+
+    // Initialize the system options to minimum defaults to work, but require useful settings inside the system options file.
+    // The minimum path length values will generate useful direct lighting results, but transmissions will be mostly black.
+    m_resolution  = make_int2(1, 1);
+    m_tileSize    = make_int2(8, 8);
+    m_pathLengths = make_int2(0, 2);
+
+    m_prefixScreenshot = std::string("./img"); // Default to current working directory and prefix "img".
+
+    // Tonemapper neutral defaults. The system description overrides these.
+    m_tonemapperGUI.gamma           = 1.0f;
+    m_tonemapperGUI.whitePoint      = 1.0f;
+    m_tonemapperGUI.colorBalance[0] = 1.0f;
+    m_tonemapperGUI.colorBalance[1] = 1.0f;
+    m_tonemapperGUI.colorBalance[2] = 1.0f;
+    m_tonemapperGUI.burnHighlights  = 1.0f;
+    m_tonemapperGUI.crushBlacks     = 0.0f;
+    m_tonemapperGUI.saturation      = 1.0f; 
+    m_tonemapperGUI.brightness      = 1.0f;
+
+    // System wide parameters are loaded from this file to keep the number of command line options small.
+    const std::string filenameSystem = options.getSystem();
+    if (!loadSystemDescription(filenameSystem))
+    {
+      std::cerr << "ERROR: Application() failed to load system description file " << filenameSystem << '\n';
+      MY_ASSERT(!"Failed to load system description");
+      return; // m_isValid == false.
+    }
+
+    std::cout << "Arena size = " << m_sizeArena << " MiB\n"; // DEBUG
+
+    const double timeSystem = m_timer.getTime(); // Contains constructor and GUI initialization.
+
+//    // ===== SCENE DESCRIPTION
+//
+//    // Host side scene graph information.
+//    m_scene = std::make_shared<sg::Group>(m_idGroup++); // Create the scene's root group first.
+//
+//    // Load the scene description file and generate the host side materials, lights, and scene hierarchy with geometry.
+//    const std::string filenameScene = options.getScene();
+//    if (!loadSceneDescription(filenameScene))
+//    {
+//      std::cerr << "ERROR: Application() failed to load scene description file " << filenameScene << '\n';
+//      MY_ASSERT(!"Failed to load scene description");
+//      return;
+//    }
+
+//    // Once the scene has been loaded into the host scene graph
+//    // traverse it once and generate light definitions for the meshes with emissive materials.
+//    createMeshLights();
+//
+//    //createPictures(); // FIXME Implement deferred texture loading of only the referenced textures.
+//    createCameras();
+    
+//    MY_ASSERT(m_idGeometry == m_geometries.size());
+//
+//    const double timeScene = m_timer.getTime();
+//
+//    // ===== RASTERIZER
+//
     m_camera.setResolution(m_resolution.x, m_resolution.y);
     m_camera.setSpeedRatio(m_mouseSpeedRatio);
-
+//
 //    // Initialize the OpenGL rasterizer.
 //    m_rasterizer = std::make_unique<Rasterizer>(m_width, m_height, m_interop);
 //
@@ -212,34 +288,20 @@ m_window(nullptr)
 //    const unsigned int pbo = m_rasterizer->getPixelBufferObject();
 //
 //    const double timeRasterizer = m_timer.getTime();
+
+//    // ===== RAYTRACER
 //
-//    // Initialize the OptiX raytracer.
-//    switch (m_strategy) // The strategy is limited to valid enums by the caller
-//    {
-//      case RS_INTERACTIVE_SINGLE_GPU:
-//        m_raytracer = std::make_unique<RaytracerSingleGPU>(m_devicesMask, m_miss, m_interop, tex, pbo);
-//        break;
+//    const TypeLight typeEnv = (!m_lightsGUI.empty()) ? m_lightsGUI[0].typeLight : NUM_LIGHT_TYPES; // NUM_LIGHT_TYPES means not an environment light either.
 //
-//      case RS_INTERACTIVE_MULTI_GPU_ZERO_COPY:
-//        m_raytracer = std::make_unique<RaytracerMultiGPUZeroCopy>(m_devicesMask, m_miss, m_interop, tex, pbo);
-//        break;
-//
-//      case RS_INTERACTIVE_MULTI_GPU_PEER_ACCESS:
-//        m_raytracer = std::make_unique<RaytracerMultiGPUPeerAccess>(m_devicesMask, m_miss, m_interop, tex, pbo);
-//        break;
-//
-//      case RS_INTERACTIVE_MULTI_GPU_LOCAL_COPY:
-//        m_raytracer = std::make_unique<RaytracerMultiGPULocalCopy>(m_devicesMask, m_miss, m_interop, tex, pbo);
-//        break;
-//    }
+//    m_raytracer = std::make_unique<Raytracer>(m_maskDevices, typeEnv, m_interop, tex, pbo, m_sizeArena, m_peerToPeer);
 //
 //    // If the raytracer could not be initialized correctly, return and leave Application invalid.
 //    if (!m_raytracer->m_isValid)
 //    {
-//      std::cerr << "ERROR: Application() Could not initialize Raytracer with strategy = " << m_strategy << '\n';
+//      std::cerr << "ERROR: Application() Could not initialize Raytracer\n";
 //      return; // Exit application.
 //    }
-
+//
 //    // Determine which device is the one running the OpenGL implementation.
 //    // The first OpenGL-CUDA device match wins.
 //    int deviceMatch = -1;
@@ -283,65 +345,41 @@ m_window(nullptr)
 //    m_state.tileSize      = m_tileSize;
 //    m_state.pathLengths   = m_pathLengths;
 //    m_state.samplesSqrt   = m_samplesSqrt;
-//    m_state.lensShader    = m_lensShader;
+//    m_state.typeLens      = m_typeLens;
 //    m_state.epsilonFactor = m_epsilonFactor;
-//    m_state.envRotation   = m_environmentRotation;
 //    m_state.clockFactor   = m_clockFactor;
-//
+//    m_state.directLighting = (m_useDirectLighting) ? 1 : 0;
+
 //    // Sync the state with the default GUI data.
 //    m_raytracer->initState(m_state);
 //
-//    const double timeRaytracer = m_timer.getTime();
-//
-//    // Host side scene graph information.
-//    m_scene = std::make_shared<sg::Group>(m_idGroup++); // Create the scene's root group first.
-//
-//    createPictures();
-//    createCameras();
-//    createLights();
-//
-//    // Load the scene description file and generate the host side scene.
-//    const std::string filenameScene = options.getScene();
-//    if (!loadSceneDescription(filenameScene))
-//    {
-//      std::cerr << "ERROR: Application() failed to load scene description file " << filenameScene << '\n';
-//      MY_ASSERT(!"Failed to load scene description");
-//      return;
-//    }
-//
-//    MY_ASSERT(m_idGeometry == m_geometries.size());
-//
-//    const double timeScene = m_timer.getTime();
-//
 //    // Device side scene information.
-//    m_raytracer->initTextures(m_mapPictures); // HACK Hardcoded textures. // FIXME Implement a full material system.
-//    m_raytracer->initCameras(m_cameras);
-//    m_raytracer->initLights(m_lights);
-//    m_raytracer->initMaterials(m_materialsGUI);
-//    m_raytracer->initScene(m_scene, m_idGeometry); // m_idGeometry is the number of geometries in the scene.
+//    m_raytracer->initTextures(m_mapPictures);
+//    m_raytracer->initCameras(m_cameras);                  // Currently there is only one but this supports arbitrary many which could be used to select viewpoints or do animation (and camera motion blur) in the future.
+//    m_raytracer->initMaterials(m_materialsGUI);           // This will handle the per material textures as well.
+//    m_raytracer->initScene(m_scene, m_idGeometry);        // m_idGeometry is the number of geometries in the scene.
+//    m_raytracer->initLights(m_lightsGUI, m_materialsGUI); // With arbitrary mesh lights, the geometry attributes and indices can only be filled after initScene().
 //
-//    const double timeRenderer = m_timer.getTime();
-//
-//    // Print out how long the initialization of each module took.
-//    std::cout << "Application(): " << timeRenderer - timeConstructor   << " seconds overall\n";
+//    const double timeRaytracer = m_timer.getTime();
+
+    // Print out how long the initialization of each module took.
+//    std::cout << "Application() " << timeRaytracer << " seconds overall\n";
 //    std::cout << "{\n";
-//    std::cout << "  GUI        = " << timeGUI        - timeConstructor << " seconds\n";
-//    //std::cout << "  Rasterizer = " << timeRasterizer - timeGUI         << " seconds\n";
-//    //std::cout << "  Raytracer  = " << timeRaytracer  - timeRasterizer  << " seconds\n";
-//    std::cout << "  Scene      = " << timeScene      - timeRaytracer   << " seconds\n";
-//    std::cout << "  Renderer   = " << timeRenderer   - timeScene       << " seconds\n";
+//    std::cout << "  System     = " << timeSystem                      << " seconds\n";
+//    std::cout << "  Scene      = " << timeScene      - timeSystem     << " seconds\n";
+//    std::cout << "  Rasterizer = " << timeRasterizer - timeScene      << " seconds\n";
+//    std::cout << "  Raytracer  = " << timeRaytracer  - timeRasterizer << " seconds\n";
 //    std::cout << "}\n";
 //
 //    restartRendering(); // Trigger a new rendering.
 //
 //    m_isValid = true;
   }
-  catch (std::exception const& e)
+  catch (const std::exception& e)
   {
     std::cerr << e.what() << '\n';
   }
 }
-
 
 Application::~Application()
 {
@@ -353,7 +391,7 @@ Application::~Application()
   if (m_window) {
       ImGui_ImplOpenGL3_Shutdown();
       ImGui_ImplGlfw_Shutdown();
-//    ImGui_ImplGlfwGL3_Shutdown();
+//      ImGui_ImplGlfwGL3_Shutdown();
       ImGui::DestroyContext();
   }
 }
@@ -406,51 +444,42 @@ int Application::initializeGui(Options const& options) {
     //ImGui_ImplGlfwGL3_NewFrame();
     ImGui::EndFrame();
 
+    // ===== RASTERIZER
+
+//    m_camera.setResolution(m_resolution.x, m_resolution.y);
+//    m_camera.setSpeedRatio(m_mouseSpeedRatio);
+
     // Initialize the OpenGL rasterizer.
     m_rasterizer = std::make_unique<Rasterizer>(m_width, m_height, m_interop);
-    
-    // Must set the resolution explicitly to be able to calculate 
+
+    // Must set the resolution explicitly to be able to calculate
     // the proper vertex attributes for display and the PBO size in case of interop.
-    m_rasterizer->setResolution(m_resolution.x, m_resolution.y); 
+    m_rasterizer->setResolution(m_resolution.x, m_resolution.y);
     m_rasterizer->setTonemapper(m_tonemapperGUI);
 
-    //const unsigned int m_tex = m_rasterizer->getTextureObject();
-    //const unsigned int m_pbo = m_rasterizer->getPixelBufferObject();
+//    const unsigned int tex = m_rasterizer->getTextureObject();
+//    const unsigned int pbo = m_rasterizer->getPixelBufferObject();
     m_tex = m_rasterizer->getTextureObject();
     m_pbo = m_rasterizer->getPixelBufferObject();
 
-    const double timeRasterizer = m_timer.getTime();
+    const double timeRasterizer = m_timer.getTime();  // Initialize the OpenGL rasterizer.
     return APP_EXIT_SUCCESS;
 }
 
 void Application::initializeRaytracer(Options const& options) {
     const unsigned int tex = m_tex;
     const unsigned int pbo = m_pbo;
-    // Initialize the OptiX raytracer.
-    switch (m_strategy) // The strategy is limited to valid enums by the caller 
-    {
-      case RS_INTERACTIVE_SINGLE_GPU:
-        m_raytracer = std::make_unique<RaytracerSingleGPU>(m_devicesMask, m_miss, m_interop, tex, pbo);
-        break;
+    // ===== RAYTRACER
 
-      case RS_INTERACTIVE_MULTI_GPU_ZERO_COPY:
-        m_raytracer = std::make_unique<RaytracerMultiGPUZeroCopy>(m_devicesMask, m_miss, m_interop, tex, pbo);
-        break;
+    const TypeLight typeEnv = (!m_lightsGUI.empty()) ? m_lightsGUI[0].typeLight : NUM_LIGHT_TYPES; // NUM_LIGHT_TYPES means not an environment light either.
 
-      case RS_INTERACTIVE_MULTI_GPU_PEER_ACCESS:
-        m_raytracer = std::make_unique<RaytracerMultiGPUPeerAccess>(m_devicesMask, m_miss, m_interop, tex, pbo);
-        break;
-
-      case RS_INTERACTIVE_MULTI_GPU_LOCAL_COPY:
-        m_raytracer = std::make_unique<RaytracerMultiGPULocalCopy>(m_devicesMask, m_miss, m_interop, tex, pbo);
-        break;
-    }
+    m_raytracer = std::make_unique<Raytracer>(m_maskDevices, typeEnv, m_interop, tex, pbo, m_sizeArena, m_peerToPeer);
 
     // If the raytracer could not be initialized correctly, return and leave Application invalid.
     if (!m_raytracer->m_isValid)
     {
-      std::cerr << "ERROR: Application() Could not initialize Raytracer with strategy = " << m_strategy << '\n';
-      return; // Exit application.
+        std::cerr << "ERROR: Application() Could not initialize Raytracer\n";
+        return; // Exit application.
     }
 
     // Determine which device is the one running the OpenGL implementation.
@@ -468,12 +497,12 @@ void Application::initializeRaytracer(Options const& options) {
 #else
     // LUID only works under Windows because it requires the EXT_external_objects_win32 extension.
     // DEBUG With multicast enabled, both devices have the same LUID and the OpenGL node mask is the OR of the individual device node masks.
-    // Means the result of the deviceMatch here is depending on the CUDA device order. 
+    // Means the result of the deviceMatch here is depending on the CUDA device order.
     // Seems like multicast needs to handle CUDA - OpenGL interop differently.
     // With multicast enabled, uploading the PBO with glTexImage2D halves the framerate when presenting each image in both the single-GPU and multi-GPU P2P strategy.
     // Means there is an expensive PCI-E copy going on in that case.
     const unsigned char* luid = m_rasterizer->getLUID();
-    const int nodeMask        = m_rasterizer->getNodeMask(); 
+    const int nodeMask        = m_rasterizer->getNodeMask();
 
     // The cuDeviceGetLuid() takes char* and unsigned int though.
     deviceMatch = m_raytracer->matchLUID(reinterpret_cast<const char*>(luid), nodeMask);
@@ -482,72 +511,73 @@ void Application::initializeRaytracer(Options const& options) {
 
     if (deviceMatch == -1)
     {
-      if (m_interop == INTEROP_MODE_TEX)
-      {
-        std::cerr << "ERROR: Application() OpenGL texture image interop without OpenGL device in active devices will not display the image!\n";
-        return; // Exit application.
-      }
-      if (m_interop == INTEROP_MODE_PBO)
-      {
-        std::cerr << "WARNING: Application() OpenGL pixel buffer interop without OpenGL device in active devices will result in reduced performance!\n";
-      }
+        if (m_interop == INTEROP_MODE_TEX)
+        {
+            std::cerr << "ERROR: Application() OpenGL texture image interop without OpenGL device in active devices will not display the image!\n";
+            return; // Exit application.
+        }
+        if (m_interop == INTEROP_MODE_PBO)
+        {
+            std::cerr << "WARNING: Application() OpenGL pixel buffer interop without OpenGL device in active devices will result in reduced performance!\n";
+        }
     }
 }
 
 void Application::initializeOptiX(Options const& options) {
-    m_state.resolution    = m_resolution;
-    m_state.tileSize      = m_tileSize;
-    m_state.pathLengths   = m_pathLengths;
-    m_state.samplesSqrt   = m_samplesSqrt;
-    m_state.lensShader    = m_lensShader;
-    m_state.epsilonFactor = m_epsilonFactor;
-    m_state.envRotation   = m_environmentRotation;
-    m_state.clockFactor   = m_clockFactor;
-
-    // Sync the state with the default GUI data.
-    m_raytracer->initState(m_state);
-
-    const double timeRaytracer = m_timer.getTime();
+    // ===== SCENE DESCRIPTION
 
     // Host side scene graph information.
     m_scene = std::make_shared<sg::Group>(m_idGroup++); // Create the scene's root group first.
 
-    createPictures();
-    createCameras();
-    createLights();
-    
-    // Load the scene description file and generate the host side scene.
+    // Load the scene description file and generate the host side materials, lights, and scene hierarchy with geometry.
     const std::string filenameScene = options.getScene();
     if (!loadSceneDescription(filenameScene))
     {
-      std::cerr << "ERROR: Application() failed to load scene description file " << filenameScene << '\n';
-      MY_ASSERT(!"Failed to load scene description");
-      return;
+        std::cerr << "ERROR: Application() failed to load scene description file " << filenameScene << '\n';
+        MY_ASSERT(!"Failed to load scene description");
+        return;
     }
+
+    // Once the scene has been loaded into the host scene graph
+    // traverse it once and generate light definitions for the meshes with emissive materials.
+    createMeshLights();
+
+    //createPictures(); // FIXME Implement deferred texture loading of only the referenced textures.
+    createCameras();
 
     MY_ASSERT(m_idGeometry == m_geometries.size());
 
     const double timeScene = m_timer.getTime();
 
+    m_state.resolution    = m_resolution;
+    m_state.tileSize      = m_tileSize;
+    m_state.pathLengths   = m_pathLengths;
+    m_state.samplesSqrt   = m_samplesSqrt;
+    m_state.typeLens      = m_typeLens;
+    m_state.epsilonFactor = m_epsilonFactor;
+    m_state.clockFactor   = m_clockFactor;
+    m_state.directLighting = (m_useDirectLighting) ? 1 : 0;
+
+    // Sync the state with the default GUI data.
+    m_raytracer->initState(m_state);
+
     // Device side scene information.
-    m_raytracer->initTextures(m_mapPictures); // HACK Hardcoded textures. // FIXME Implement a full material system.
-    m_raytracer->initCameras(m_cameras);
-    m_raytracer->initLights(m_lights);
-    m_raytracer->initMaterials(m_materialsGUI);
-    m_raytracer->initScene(m_scene, m_idGeometry); // m_idGeometry is the number of geometries in the scene.
-    
-    const double timeRenderer = m_timer.getTime();
+    m_raytracer->initTextures(m_mapPictures);
+    m_raytracer->initCameras(m_cameras);                  // Currently there is only one but this supports arbitrary many which could be used to select viewpoints or do animation (and camera motion blur) in the future.
+    m_raytracer->initMaterials(m_materialsGUI);           // This will handle the per material textures as well.
+    m_raytracer->initScene(m_scene, m_idGeometry);        // m_idGeometry is the number of geometries in the scene.
+    m_raytracer->initLights(m_lightsGUI, m_materialsGUI); // With arbitrary mesh lights, the geometry attributes and indices can only be filled after initScene().
+
+    const double timeRaytracer = m_timer.getTime();
 
     // Print out how long the initialization of each module took.
-    //std::cout << "Application(): " << timeRenderer - timeConstructor   << " seconds overall\n";
-    //std::cout << "{\n";
-    //std::cout << "  GUI        = " << timeGUI        - timeConstructor << " seconds\n";
-    //std::cout << "  Rasterizer = " << timeRasterizer - timeGUI         << " seconds\n";
-    //std::cout << "  Raytracer  = " << timeRaytracer  - timeRasterizer  << " seconds\n";
-    //std::cout << "  Scene      = " << timeScene      - timeRaytracer   << " seconds\n";
-    //std::cout << "  Renderer   = " << timeRenderer   - timeScene       << " seconds\n";
-    //std::cout << "}\n";
-
+//    std::cout << "Application() " << timeRaytracer << " seconds overall\n";
+//    std::cout << "{\n";
+//    std::cout << "  System     = " << timeSystem                      << " seconds\n";
+//    std::cout << "  Scene      = " << timeScene      - timeSystem     << " seconds\n";
+//    std::cout << "  Rasterizer = " << timeRasterizer - timeScene      << " seconds\n";
+//    std::cout << "  Raytracer  = " << timeRaytracer  - timeRasterizer << " seconds\n";
+//    std::cout << "}\n";
     restartRendering(); // Trigger a new rendering.
 
     m_isValid = true;
@@ -582,7 +612,6 @@ void Application::restartRendering()
   m_timer.restart();
 }
 
-
 bool Application::render()
 {
   bool finish = false;
@@ -615,7 +644,7 @@ bool Application::render()
     
     m_previousComplete = complete;
     
-    // When benchmark is enabled, exit the application when the requested samples per pixel have ben rendered.
+    // When benchmark is enabled, exit the application when the requested samples per pixel have been rendered.
     // Actually this render() function is not called when m_mode == 1 but keep the finish here to exit on exceptions.
     finish = ((m_mode == 1) && complete);
     
@@ -653,18 +682,18 @@ bool Application::render()
 
 #if 0   // Automated benchmark in interactive mode. Change m_isVisibleGUI default to false!
         std::ostringstream filename;
-        filename << "result_interactive_" << m_strategy << "_" << m_interop << "_" << m_tileSize.x << "_" << m_tileSize.y << ".log";
+        filename << "result_interactive_" << m_interop << "_" << m_tileSize.x << "_" << m_tileSize.y << ".log";
         const bool success = saveString(filename.str(), stream.str());
         if (success)
         {
-          std::cout << filename.str()  << '\n'; // Print out the filename to indicate success.
+          std::cout << filename.str() << '\n'; // Print out the filename to indicate success.
         }
         finish = true; // Exit application after interactive rendering finished.
 #endif
       }
     }
   }
-  catch (std::exception const& e)
+  catch (const std::exception& e)
   {
     std::cerr << e.what() << '\n';
     finish = true;
@@ -672,20 +701,29 @@ bool Application::render()
   return finish;
 }
 
-
 void Application::benchmark()
 {
   try
   {
+    CameraDefinition camera;
+
+    const bool cameraChanged = m_camera.getFrustum(camera.P, camera.U, camera.V, camera.W);
+    if (cameraChanged)
+    {
+      m_cameras[0] = camera;
+      m_raytracer->updateCamera(0, camera);
+
+      // restartRendering();
+    }
+
     const unsigned int spp = (unsigned int)(m_samplesSqrt * m_samplesSqrt);
     unsigned int iterationIndex = 0; 
 
     m_timer.restart();
-    m_raytracer->m_iterationIndex = 0;
 
     while (iterationIndex < spp)
     {
-      iterationIndex = m_raytracer->render();
+      iterationIndex = m_raytracer->render(m_mode);
     }
     
     m_raytracer->synchronize(); // Wait until any asynchronous operations have finished.
@@ -700,7 +738,7 @@ void Application::benchmark()
 
 #if 0 // Automated benchmark in batch mode.
     std::ostringstream filename;
-    filename << "result_batch_" << m_strategy << "_" << m_interop << "_" << m_tileSize.x << "_" << m_tileSize.y << ".log";
+    filename << "result_batch_" << m_interop << "_" << m_tileSize.x << "_" << m_tileSize.y << ".log";
     const bool success = saveString(filename.str(), stream.str());
     if (success)
     {
@@ -710,12 +748,11 @@ void Application::benchmark()
 
     screenshot(true);
   }
-  catch (std::exception const& e)
+  catch (const std::exception& e)
   {
     std::cerr << e.what() << '\n';
   }
 }
-
 
 void Application::display()
 {
@@ -727,12 +764,13 @@ void Application::guiNewFrame()
   ImGui_ImplOpenGL3_NewFrame();
   ImGui_ImplGlfw_NewFrame();
   ImGui::NewFrame();
-//    ImGui_ImplGlfwGL3_NewFrame();
+//  ImGui_ImplGlfwGL3_NewFrame();
 }
 
 void Application::guiReferenceManual()
 {
-  ImGui::ShowDemoWindow();
+    ImGui::ShowDemoWindow();
+//    ImGui::ShowTestWindow();
 }
 
 void Application::guiRender()
@@ -740,28 +778,6 @@ void Application::guiRender()
   ImGui::Render();
   ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
 //  ImGui_ImplGlfwGL3_RenderDrawData(ImGui::GetDrawData());
-}
-
-void Application::createPictures()
-{
-  // DAR HACK Load some hardcoded Pictures referenced by the materials.   
-  unsigned int flags = IMAGE_FLAG_2D; // Load only the LOD into memory.
-
-  Picture* picture = new Picture();
-  picture->load(std::string("./NVIDIA_Logo.jpg"), flags);
-  m_mapPictures[std::string("albedo")] = picture; // The map owns the pointers.
-
-  picture = new Picture();
-  picture->load(std::string("./slots_rgba.png"), flags);
-  m_mapPictures[std::string("cutout")] = picture;
-
-  if (m_miss == 2 && !m_environment.empty())
-  {
-    flags |= IMAGE_FLAG_ENV; // Special case for the spherical environment.
-    picture = new Picture();
-    picture->load(m_environment, flags);
-    m_mapPictures[std::string("environment")] = picture;
-  }
 }
 
 void Application::createCameras()
@@ -772,125 +788,16 @@ void Application::createCameras()
 
   m_cameras.push_back(camera);
 }
-  
-
-void Application::createLights()
-{
-  LightDefinition light;
-
-  // Unused in environment lights. 
-  light.position = make_float3(0.0f, 0.0f, 0.0f);
-  light.vecU     = make_float3(1.0f, 0.0f, 0.0f);
-  light.vecV     = make_float3(0.0f, 1.0f, 0.0f);
-  light.normal   = make_float3(0.0f, 0.0f, 1.0f);
-  light.area     = 1.0f;
-  light.emission = make_float3(1.0f, 1.0f, 1.0f);
-  
-  // The environment light is expected in sysData.lightDefinitions[0], but since there is only one, 
-  // the sysData struct contains the data for the spherical HDR environment light when enabled.
-  // All other lights are indexed by their position inside the array.
-  switch (m_miss)
-  {
-  case 0: // No environment light at all. Faster than a zero emission constant environment!
-  default:
-    break;
-
-  case 1: // Constant environment light.
-  case 2: // HDR Environment mapping with loaded texture. Texture handling happens in the Raytracer::initTextures().
-    light.type = LIGHT_ENVIRONMENT;
-    light.area = 4.0f * M_PIf; // Unused.
-
-    m_lights.push_back(light); // The environment light is always in m_lights[0].
-    break;
-  }
-
-  const int indexLight = static_cast<int>(m_lights.size());
-  float3 normal;
-
-  switch (m_light)
-  {
-    case 0: // No area light.
-    default:
-      break;
-
-    case 1: // Add a 1x1 square area light over the scene objects at y = 1.95 to fit into a 2x2x2 box.
-      light.type     = LIGHT_PARALLELOGRAM;              // A geometric area light with diffuse emission distribution function.
-      light.position = make_float3(-0.5f, 1.95f, -0.5f); // Corner position.
-      light.vecU     = make_float3(1.0f, 0.0f, 0.0f);    // To the right.
-      light.vecV     = make_float3(0.0f, 0.0f, 1.0f);    // To the front. 
-      normal         = cross(light.vecU, light.vecV);   // Length of the cross product is the area.
-      light.area     = length(normal);                  // Calculate the world space area of that rectangle, unit is [m^2]
-      light.normal   = normal / light.area;             // Normalized normal
-      light.emission = make_float3(10.0f);              // Radiant exitance in Watt/m^2.
-      m_lights.push_back(light);
-      break;
-
-    case 2: // Add a 4x4 square area light over the scene objects at y = 4.0.
-      light.type     = LIGHT_PARALLELOGRAM;             // A geometric area light with diffuse emission distribution function.
-      light.position = make_float3(-2.0f, 4.0f, -2.0f); // Corner position.
-      light.vecU     = make_float3(4.0f, 0.0f, 0.0f);   // To the right.
-      light.vecV     = make_float3(0.0f, 0.0f, 4.0f);   // To the front. 
-      normal         = cross(light.vecU, light.vecV);   // Length of the cross product is the area.
-      light.area     = length(normal);                  // Calculate the world space area of that rectangle, unit is [m^2]
-      light.normal   = normal / light.area;             // Normalized normal
-      light.emission = make_float3(10.0f);              // Radiant exitance in Watt/m^2.
-      m_lights.push_back(light);
-      break;
-  }
-  
-  if (0 < m_light) // If there is an area light in the scene
-  {
-
-    // Create a material for this light.
-    std::string reference("rtigo3_area_light");
-
-    const int indexMaterial = static_cast<int>(m_materialsGUI.size());
-
-    MaterialGUI materialGUI;
-
-    materialGUI.name             = reference;
-    materialGUI.indexBSDF        = INDEX_BRDF_SPECULAR;
-    materialGUI.albedo           = make_float3(0.0f); // Black
-    materialGUI.roughness        = make_float2(0.1f);
-    materialGUI.absorptionColor  = make_float3(1.0f); // White means no absorption.
-    materialGUI.absorptionScale  = 0.0f;              // 0.0f means no absoption.
-    materialGUI.ior              = 1.5f;
-    materialGUI.thinwalled       = true;
-    materialGUI.useAlbedoTexture = false;
-    materialGUI.useCutoutTexture = false;
-
-    m_materialsGUI.push_back(materialGUI); // at indexMaterial.
-
-    m_mapMaterialReferences[reference] = indexMaterial;
-
-    // Create the Triangles for this parallelogram light.
-    m_mapGeometries[reference] = m_idGeometry;
-    
-    std::shared_ptr<sg::Triangles> geometry(new sg::Triangles(m_idGeometry++));
-    geometry->createParallelogram(light.position, light.vecU, light.vecV, light.normal);
-
-    m_geometries.push_back(geometry);
-
-    std::shared_ptr<sg::Instance> instance(new sg::Instance(m_idInstance++));
-    // instance->setTransform(trafo); // Instance default matrix is identity.
-    instance->setChild(geometry);
-    instance->setMaterial(indexMaterial);
-    instance->setLight(indexLight);
-
-    m_scene->addChild(instance);
-  }
-}
-
 
 void Application::guiEventHandler()
 {
-  ImGuiIO const& io = ImGui::GetIO();
+  const ImGuiIO& io = ImGui::GetIO();
 
   if (ImGui::IsKeyPressed(' ', false)) // Key Space: Toggle the GUI window display.
   {
     m_isVisibleGUI = !m_isVisibleGUI;
   }
-  if (ImGui::IsKeyPressed('S', false)) // Key S: Save the current system options to a file "system_rtigo3_<year><month><day>_<hour><minute><second>_<millisecond>.txt"
+  if (ImGui::IsKeyPressed('S', false)) // Key S: Save the current system options to a file "system_rtigo9_<year><month><day>_<hour><minute><second>_<millisecond>.txt"
   {
     MY_VERIFY( saveSystemDescription() );
   }
@@ -969,7 +876,6 @@ void Application::guiEventHandler()
   }
 }
 
-
 void Application::guiWindow()
 {
   if (!m_isVisibleGUI || m_mode == 1) // Use SPACE to toggle the display of the GUI window.
@@ -983,7 +889,7 @@ void Application::guiWindow()
 //  ImGui::SetNextWindowSize(ImVec2(200, 200), ImGuiSetCond_FirstUseEver);
 
   ImGuiWindowFlags window_flags = 0;
-  if (!ImGui::Begin("rtigo3", nullptr, window_flags)) // No bool flag to omit the close button.
+  if (!ImGui::Begin("rtigo9", nullptr, window_flags)) // No bool flag to omit the close button.
   {
     // Early out if the window is collapsed, as an optimization.
     ImGui::End();
@@ -1002,9 +908,15 @@ void Application::guiWindow()
     {
       // No action needed, happens automatically.
     }
-    if (ImGui::Combo("Camera", (int*) &m_lensShader, "Pinhole\0Fisheye\0Spherical\0\0"))
+    if (ImGui::Checkbox("Direct Lighting", &m_useDirectLighting))
     {
-      m_state.lensShader = m_lensShader;
+      m_state.directLighting = (m_useDirectLighting) ? 1 : 0;
+      m_raytracer->updateState(m_state);
+      refresh = true;
+    }
+    if (ImGui::Combo("Camera", (int*) &m_typeLens, "Pinhole\0Fisheye\0Spherical\0\0"))
+    {
+      m_state.typeLens = m_typeLens;
       m_raytracer->updateState(m_state);
       refresh = true;
     }
@@ -1019,7 +931,6 @@ void Application::guiWindow()
       m_raytracer->updateState(m_state);
       refresh = true;
     }
-    // bool ImGui::InputInt(const char* label, int* v, int step, int step_fast, ImGuiInputTextFlags extra_flags)
     if (ImGui::InputInt("SamplesSqrt", &m_samplesSqrt, 0, 0, ImGuiInputTextFlags_EnterReturnsTrue))
     {
       m_samplesSqrt = clamp(m_samplesSqrt, 1, 256); // Samples per pixel are squares in the range [1, 65536].
@@ -1036,12 +947,6 @@ void Application::guiWindow()
     if (ImGui::DragFloat("Scene Epsilon", &m_epsilonFactor, 1.0f, 0.0f, 10000.0f))
     {
       m_state.epsilonFactor = m_epsilonFactor;
-      m_raytracer->updateState(m_state);
-      refresh = true;
-    }
-    if (ImGui::DragFloat("Env Rotation", &m_environmentRotation, 0.001f, 0.0f, 1.0f))
-    {
-      m_state.envRotation = m_environmentRotation;
       m_raytracer->updateState(m_state);
       refresh = true;
     }
@@ -1067,8 +972,7 @@ void Application::guiWindow()
     {
       changed = true;
     }
-    if (ImGui::DragFloat("White Point", &m_tonemapperGUI.whitePoint, 0.01f, 0.01f, 255.0f, "%.2f", ImGuiSliderFlags_Logarithmic)) // Must not get 0.0f
-//    if (ImGui::DragFloat("White Point", &m_tonemapperGUI.whitePoint, 0.01f, 0.01f, 255.0f, "%.2f", 2.0f)) // Must not get 0.0f
+    if (ImGui::DragFloat("White Point", &m_tonemapperGUI.whitePoint, 0.01f, 0.01f, 255.0f, "%.2f", 2.0f)) // Must not get 0.0f
     {
       changed = true;
     }
@@ -1084,8 +988,7 @@ void Application::guiWindow()
     {
       changed = true;
     }
-    if (ImGui::DragFloat("Brightness", &m_tonemapperGUI.brightness, 0.01f, 0.0f, 100.0f, "%.2f", ImGuiSliderFlags_Logarithmic))
-//    if (ImGui::DragFloat("Brightness", &m_tonemapperGUI.brightness, 0.01f, 0.0f, 100.0f, "%.2f", 2.0f))
+    if (ImGui::DragFloat("Brightness", &m_tonemapperGUI.brightness, 0.01f, 0.0f, 100.0f, "%.2f", 2.0f))
     {
       changed = true;
     }
@@ -1097,44 +1000,39 @@ void Application::guiWindow()
 #endif // !USE_TIME_VIEW
   if (ImGui::CollapsingHeader("Materials"))
   {
-    for (int i = 0; i < static_cast<int>(m_materialsGUI.size()); ++i)
+    // Note that this simple material parameter GUI doesn't allow changing assigned textures.
+    for (int iMaterial = 0; iMaterial < static_cast<int>(m_materialsGUI.size()); ++iMaterial)
     {
       bool changed = false;
 
-      MaterialGUI& materialGUI = m_materialsGUI[i];
+      MaterialGUI& materialGUI = m_materialsGUI[iMaterial];
 
-      if (ImGui::TreeNode((void*)(intptr_t) i, "%s", m_materialsGUI[i].name.c_str()))
+      if (ImGui::TreeNode((void*)(intptr_t) iMaterial, "%s", m_materialsGUI[iMaterial].name.c_str()))
       {
-
-        if (ImGui::Combo("BxDF Type", (int*) &materialGUI.indexBSDF, "BRDF Diffuse\0BRDF Specular\0BSDF Specular\0BRDF GGX Smith\0BSDF GGX Smith\0\0"))
+        if (ImGui::Combo("BxDF Type", (int*) &materialGUI.typeBXDF, "BXDF\0BRDF Diffuse\0BRDF Specular\0BSDF Specular\0BRDF GGX Smith\0BSDF GGX Smith\0\0"))
         {
           changed = true;
         }
-        if (ImGui::ColorEdit3("Albedo", (float*) &materialGUI.albedo))
+        if (materialGUI.typeBXDF != TYPE_BXDF) // The default BXDF has no parameters.
         {
-          changed = true;
-        }
-        if (ImGui::Checkbox("Use Albedo Texture", &materialGUI.useAlbedoTexture))
-        {
-          changed = true;
-        }
-        if (ImGui::Checkbox("Use Cutout Texture", &materialGUI.useCutoutTexture))
-        {
-          changed = true;
+          if (ImGui::ColorEdit3("Albedo", (float*) &materialGUI.colorAlbedo))
+          {
+            changed = true;
+          }
         }
         if (ImGui::Checkbox("Thin-Walled", &materialGUI.thinwalled)) // Set this to true when using cutout opacity!
         {
           changed = true;
         }	
         // Only show material parameters for the BxDFs which are affected by IOR and volume absorption.
-        if (materialGUI.indexBSDF == INDEX_BSDF_SPECULAR ||
-            materialGUI.indexBSDF == INDEX_BSDF_GGX_SMITH)
+        if (materialGUI.typeBXDF == TYPE_BSDF_SPECULAR ||
+            materialGUI.typeBXDF == TYPE_BSDF_GGX_SMITH)
         {
-          if (ImGui::ColorEdit3("Absorption", (float*) &materialGUI.absorptionColor)) 
+          if (ImGui::ColorEdit3("Absorption", (float*) &materialGUI.colorAbsorption))
           {
             changed = true;
           }
-          if (ImGui::DragFloat("Absorption Scale", &materialGUI.absorptionScale, 0.01f, 0.0f, 1000.0f, "%.2f"))
+          if (ImGui::DragFloat("Absorption Scale", &materialGUI.scaleAbsorption, 0.01f, 0.0f, 1000.0f, "%.2f"))
           {
             changed = true;
           }
@@ -1144,13 +1042,13 @@ void Application::guiWindow()
           }
         }
         // Only show material parameters for the BxDFs which are affected by roughness.
-        if (materialGUI.indexBSDF == INDEX_BRDF_GGX_SMITH ||
-            materialGUI.indexBSDF == INDEX_BSDF_GGX_SMITH)
+        if (materialGUI.typeBXDF == TYPE_BRDF_GGX_SMITH ||
+            materialGUI.typeBXDF == TYPE_BSDF_GGX_SMITH)
         {
           if (ImGui::DragFloat2("Roughness", reinterpret_cast<float*>(&materialGUI.roughness), 0.001f, 0.0f, 1.0f, "%.3f"))
           {
             // Clamp the microfacet roughness to working values minimum values.
-            // FIXME When both roughness values fall below that threshold, use INDEX_BSDF_SPECULAR_REFLECTION instead.
+            // FIXME When both roughness values fall below that threshold, use TYPE_BRDF_SPECULAR instead.
             if (materialGUI.roughness.x < MICROFACET_MIN_ROUGHNESS)
             {
               materialGUI.roughness.x = MICROFACET_MIN_ROUGHNESS;
@@ -1163,33 +1061,55 @@ void Application::guiWindow()
           }
         }
 
+        // Some material parameters also affect lights.
+        if (materialGUI.typeEDF != TYPE_EDF) // The default EDF has no parameters.
+        {
+          if (ImGui::ColorEdit3("Emission", (float*) &materialGUI.colorEmission))
+          {
+            changed = true;
+          }
+          if (ImGui::DragFloat("Emission Multiplier", &materialGUI.multiplierEmission, 0.01f, 0.0f, 1000000.0f, "%.2f", 2.0f))
+          {
+            materialGUI.multiplierEmission = dp::math::clamp(materialGUI.multiplierEmission, 0.0f, 1000000.0f);
+            changed = true;
+          }
+          // These two values only affect spot lights.
+          if (ImGui::DragFloat("Spot Angle", &materialGUI.spotAngle, 0.01f, 0.0f, 180.0f, "%.2f"))
+          {
+            // It's possible to double click and edit DragFloat fields with values outside the drag range.
+            // Make sure the spotAngle is in the expected range. This is not as critical for the multiplier and the exponent.
+            materialGUI.spotAngle = dp::math::clamp(materialGUI.spotAngle, 0.0f, 180.0f);
+            changed = true;
+          }
+          if (ImGui::DragFloat("Spot Exponent", &materialGUI.spotExponent, 0.01f, 0.0f, 100.0f, "%.2f"))
+          {
+            materialGUI.spotExponent = dp::math::clamp(materialGUI.spotExponent, 0.0f, 100.0f);
+            changed = true;
+          }
+        }
+
         if (changed)
         {
-          m_raytracer->updateMaterial(i, materialGUI);
+          m_raytracer->updateMaterial(iMaterial, materialGUI);
+
+          // Some material parameters affect the lights using this material.
+          // Right now only the emission and spot parameters can be changed here.
+          // These are only stored in the device-side structure LightDefinition.
+          // Means we only need to find the lights which use the changed material index and update the parameters of that.
+          // FIXME Allow changing the orientation of the environment light inside the GUI as well.
+          for (size_t iLight = 0; iLight < m_lightsGUI.size(); ++iLight)
+          {
+            const LightGUI& lightGUI = m_lightsGUI[iLight]; // LightGUI data on the host.
+
+            // If this material index is used by this light index, update the device side LightDefinition values.
+            if (iMaterial == lightGUI.idMaterial)
+            {
+              m_raytracer->updateLight(iLight, materialGUI);
+            }
+          }
           refresh = true;
         }
         ImGui::TreePop();
-      }
-    }
-  }
-  if (ImGui::CollapsingHeader("Lights"))
-  {
-    for (int i = 0; i < static_cast<int>(m_lights.size()); ++i)
-    {
-      LightDefinition& light = m_lights[i];
-
-      // Allow to change the emission (radiant exitance in Watt/m^2 of the rectangle lights in the scene.
-      if (light.type == LIGHT_PARALLELOGRAM)
-      {
-        if (ImGui::TreeNode((void*)(intptr_t) i, "Light %d", i))
-        {
-          if (ImGui::DragFloat3("Emission", (float*) &light.emission, 0.1f, 0.0f, 10000.0f, "%.1f"))
-          {
-            m_raytracer->updateLight(i, light);
-            refresh = true;
-          }
-          ImGui::TreePop();
-        }
       }
     }
   }
@@ -1206,7 +1126,6 @@ void Application::guiWindow()
 
 void Application::guiRenderingIndicator(const bool isRendering)
 {
-  if (!m_window) return;
   // NVIDIA Green when rendering is complete.
   float r = 0.462745f;
   float g = 0.72549f;
@@ -1229,7 +1148,7 @@ void Application::guiRenderingIndicator(const bool isRendering)
 }
 
 
-bool Application::loadSystemDescription(std::string const& filename)
+bool Application::loadSystemDescription(const std::string& filename)
 {
   Parser parser;
 
@@ -1253,36 +1172,44 @@ bool Application::loadSystemDescription(std::string const& filename)
 
     if (tokenType == PTT_ID) 
     {
-      if (token == "strategy")
+      //if (token == "strategy")
+      //{
+      //  // Ignored in this renderer. Behaves like RS_INTERACTIVE_MULTI_GPU_LOCAL_COPY, but single-GPU is optimized to not invoke the compositor.
+      //  tokenType = parser.getNextToken(token);
+      //  MY_ASSERT(tokenType == PTT_VAL);
+      //  const int strategy = atoi(token.c_str());
+
+      //  std::cerr << "WARNING: loadSystemDescription() renderer strategy " << strategy << " ignored.\n";
+      //}
+      //else 
+      if (token == "devicesMask") // FIXME Kept the old name to be able to mix and match apps.
       {
         tokenType = parser.getNextToken(token);
         MY_ASSERT(tokenType == PTT_VAL);
-        const int strategy = atoi(token.c_str());
-        if (0 <= strategy && strategy < NUM_RENDERER_STRATEGIES)
-        {
-          m_strategy = static_cast<RendererStrategy>(strategy);
-        }
-        else
-        {
-          std::cerr << "WARNING: loadSystemDescription() Invalid renderer strategy " << strategy << ", using Interactive Single GPU.\n";
-        }
+        m_maskDevices = atoi(token.c_str());
       }
-      else if (token == "devicesMask")
+      else if (token == "arenaSize") // In mebi-bytes.
       {
         tokenType = parser.getNextToken(token);
         MY_ASSERT(tokenType == PTT_VAL);
-        m_devicesMask = atoi(token.c_str());
+        m_sizeArena = std::max(1, atoi(token.c_str()));
       }
       else if (token == "interop")
       {
         tokenType = parser.getNextToken(token);
         MY_ASSERT(tokenType == PTT_VAL);
         m_interop = atoi(token.c_str());
-        if (m_interop < 0 || 3 < m_interop)
+        if (m_interop < 0 || 2 < m_interop)
         {
           std::cerr << "WARNING: loadSystemDescription() Invalid interop value " << m_interop << ", using interop 0 (host).\n";
           m_interop = 0;
         }
+      }
+      else if (token == "peerToPeer")
+      {
+        tokenType = parser.getNextToken(token);
+        MY_ASSERT(tokenType == PTT_VAL);
+        m_peerToPeer = atoi(token.c_str());
       }
       else if (token == "present")
       {
@@ -1324,46 +1251,13 @@ bool Application::loadSystemDescription(std::string const& filename)
       {
         tokenType = parser.getNextToken(token);
         MY_ASSERT(tokenType == PTT_VAL);
-        m_samplesSqrt = std::max(1, atoi(token.c_str()));  // spp = m_samplesSqrt * m_samplesSqrt
-      }
-      else if (token == "miss")
-      {
-        tokenType = parser.getNextToken(token);
-        MY_ASSERT(tokenType == PTT_VAL);
-        m_miss = atoi(token.c_str());
-      }
-      else if (token == "envMap")
-      {
-        tokenType = parser.getNextToken(token); // Needs to be a filename in quotation marks.
-        MY_ASSERT(tokenType == PTT_STRING);
-        convertPath(token);
-        m_environment = token;
-      }
-      else  if (token == "envRotation")
-      {
-        tokenType = parser.getNextToken(token);
-        MY_ASSERT(tokenType == PTT_VAL);
-        m_environmentRotation = (float) atof(token.c_str());
+        m_samplesSqrt = std::max(1, atoi(token.c_str())); // spp = m_samplesSqrt * m_samplesSqrt
       }
       else  if (token == "clockFactor")
       {
         tokenType = parser.getNextToken(token);
         MY_ASSERT(tokenType == PTT_VAL);
         m_clockFactor = (float) atof(token.c_str());
-      }
-      else if (token == "light")
-      {
-        tokenType = parser.getNextToken(token);
-        MY_ASSERT(tokenType == PTT_VAL);
-        m_light = atoi(token.c_str());
-        if (m_light < 0)
-        {
-          m_light = 0;
-        }
-        else if (2 < m_light)
-        {
-          m_light = 2;
-        }
       }
       else if (token == "pathLengths")
       {
@@ -1380,14 +1274,16 @@ bool Application::loadSystemDescription(std::string const& filename)
         MY_ASSERT(tokenType == PTT_VAL);
         m_epsilonFactor = (float) atof(token.c_str());
       }
+      // The lens shader, center of interest, and camera values can be set in either the system or scene definition file.
+      // The scene defintion will take precedence because it's loaded afterwards.
       else if (token == "lensShader")
       {
         tokenType = parser.getNextToken(token);
         MY_ASSERT(tokenType == PTT_VAL);
-        m_lensShader = static_cast<LensShader>(atoi(token.c_str()));
-        if (m_lensShader < LENS_SHADER_PINHOLE || LENS_SHADER_SPHERE < m_lensShader)
+        m_typeLens = static_cast<TypeLens>(atoi(token.c_str()));
+        if (m_typeLens < TYPE_LENS_PINHOLE || TYPE_LENS_SPHERE < m_typeLens)
         {
-          m_lensShader = LENS_SHADER_PINHOLE;
+          m_typeLens = TYPE_LENS_PINHOLE;
         }
       }
       else if (token == "center")
@@ -1427,6 +1323,8 @@ bool Application::loadSystemDescription(std::string const& filename)
         convertPath(token);
         m_prefixScreenshot = token;
       }
+      // All Tonemapper values can be set in either the system or scene definition file.
+      // The scene defintion will take precedence because it's loaded afterwards.
       else if (token == "gamma")
       {
         tokenType = parser.getNextToken(token);
@@ -1477,7 +1375,7 @@ bool Application::loadSystemDescription(std::string const& filename)
       }
       else
       {
-        std::cerr << "WARNING: loadSystemDescription(): Unknown system option name: " << token << '\n';
+        std::cerr << "WARNING: loadSystemDescription() Unknown system option name: " << token << '\n';
       }
     }
   }
@@ -1489,24 +1387,18 @@ bool Application::saveSystemDescription()
 {
   std::ostringstream description;
 
-  description << "strategy " << m_strategy << '\n';
-  description << "devicesMask " << m_devicesMask << '\n';
+  description << "strategy " << m_strategy << '\n'; // Ignored in this renderer.
+  description << "devicesMask " << m_maskDevices << '\n';
+  description << "arenaSize " << m_sizeArena << '\n';
   description << "interop " << m_interop << '\n';
   description << "present " << ((m_present) ? "1" : "0") << '\n';
   description << "resolution " << m_resolution.x << " " << m_resolution.y << '\n';
   description << "tileSize " << m_tileSize.x << " " << m_tileSize.y << '\n';
   description << "samplesSqrt " << m_samplesSqrt << '\n';
-  description << "miss " << m_miss << '\n';
-  if (!m_environment.empty())
-  {
-    description << "envMap \"" << m_environment << "\"\n";
-  }
-  description << "envRotation " << m_environmentRotation << '\n';
   description << "clockFactor " << m_clockFactor << '\n';
-  description << "light " << m_light << '\n';
   description << "pathLengths " << m_pathLengths.x << " " << m_pathLengths.y << '\n';
   description << "epsilonFactor " << m_epsilonFactor << '\n';
-  description << "lensShader " << m_lensShader << '\n';
+  description << "lensShader " << m_typeLens << '\n';
   description << "center " << m_camera.m_center.x << " " << m_camera.m_center.y << " " << m_camera.m_center.z << '\n';
   description << "camera " << m_camera.m_phi << " " << m_camera.m_theta << " " << m_camera.m_fov << " " << m_camera.m_distance << '\n';
   if (!m_prefixScreenshot.empty())
@@ -1521,39 +1413,19 @@ bool Application::saveSystemDescription()
   description << "saturation " << m_tonemapperGUI.saturation << '\n';
   description << "brightness " << m_tonemapperGUI.brightness << '\n';
 
-  const std::string filename = std::string("system_rtigo3_") + getDateTime() + std::string(".txt");
+  const std::string filename = std::string("system_rtigo9_") + getDateTime() + std::string(".txt");
   const bool success = saveString(filename, description.str());
   if (success)
   {
-    std::cout << filename << '\n'; // Print out the filename to indicate success.
+    std::cout << filename  << '\n'; // Print out the filename to indicate success.
   }
   return success;
 }
 
-void Application::appendInstance(std::shared_ptr<sg::Group>& group,
-                                 std::shared_ptr<sg::Triangles> geometry, 
-                                 dp::math::Mat44f const& matrix, 
-                                 std::string const& reference, 
-                                 unsigned int& idInstance)
+int Application::findMaterial(const std::string& reference) const
 {
-  // nvpro-pipeline matrices are row-major multiplied from the right, means the translation is in the last row. Transpose!
-  const float trafo[12] =
-  {
-    matrix[0][0], matrix[1][0], matrix[2][0], matrix[3][0], 
-    matrix[0][1], matrix[1][1], matrix[2][1], matrix[3][1], 
-    matrix[0][2], matrix[1][2], matrix[2][2], matrix[3][2]
-  };
+  int indexMaterial = -1; // -1 means not found. This is a critical error.
 
-  MY_ASSERT(matrix[0][3] == 0.0f && 
-            matrix[1][3] == 0.0f && 
-            matrix[2][3] == 0.0f && 
-            matrix[3][3] == 1.0f);
-
-  std::shared_ptr<sg::Instance> instance(new sg::Instance(idInstance++));
-  instance->setTransform(trafo);
-  instance->setChild(geometry);
-
-  int indexMaterial = -1;
   std::map<std::string, int>::const_iterator itm = m_mapMaterialReferences.find(reference);
   if (itm != m_mapMaterialReferences.end())
   {
@@ -1570,17 +1442,98 @@ void Application::appendInstance(std::shared_ptr<sg::Group>& group,
     }
     else 
     {
-      std::cerr << "ERROR: appendInstance() No default material found\n";
+      std::cerr << "ERROR: appendInstance() No default material found.\n";
     }
   }
+  return indexMaterial;
+}
 
+void Application::appendInstance(std::shared_ptr<sg::Group>& group,
+                                 std::shared_ptr<sg::Node> geometry,
+                                 const dp::math::Mat44f& matrix, 
+                                 const int indexMaterial, 
+                                 const int indexLight)
+{
+  // nvpro-pipeline matrices are row-major multiplied from the right, means the translation is in the last row. Transpose!
+  const float trafo[12] =
+  {
+    matrix[0][0], matrix[1][0], matrix[2][0], matrix[3][0], 
+    matrix[0][1], matrix[1][1], matrix[2][1], matrix[3][1], 
+    matrix[0][2], matrix[1][2], matrix[2][2], matrix[3][2]
+  };
+
+  MY_ASSERT(matrix[0][3] == 0.0f && 
+            matrix[1][3] == 0.0f && 
+            matrix[2][3] == 0.0f && 
+            matrix[3][3] == 1.0f);
+
+  std::shared_ptr<sg::Instance> instance(new sg::Instance(m_idInstance++));
+
+  instance->setTransform(trafo);
+  instance->setChild(geometry);
   instance->setMaterial(indexMaterial);
+  instance->setLight(indexLight);
 
   group->addChild(instance);
 }
 
 
-bool Application::loadSceneDescription(std::string const& filename)
+TypeBXDF Application::determineTypeBXDF(const std::string& token) const
+{
+  std::map<std::string, KeywordScene>::const_iterator it = m_mapKeywordScene.find(token);
+  if (it == m_mapKeywordScene.end())
+  {
+    std::cerr << "ERROR: determineTypeBXDF() Unknown token " << token << '\n';
+    return TYPE_BXDF;
+  }
+
+  switch (it->second)
+  {
+    case KS_BXDF:
+      return TYPE_BXDF;
+    case KS_BRDF_DIFFUSE:
+      return TYPE_BRDF_DIFFUSE;
+    case KS_BRDF_SPECULAR:
+      return TYPE_BRDF_SPECULAR;
+    case KS_BSDF_SPECULAR:
+      return TYPE_BSDF_SPECULAR;
+    case KS_BRDF_GGX_SMITH:
+      return TYPE_BRDF_GGX_SMITH;
+    case KS_BSDF_GGX_SMITH:
+      return TYPE_BSDF_GGX_SMITH;
+    default:
+      std::cerr << "ERROR: determineTypeBXDF() Unexpected BXDF keyword " << token << '\n';
+      return TYPE_BXDF;
+  }
+}
+
+TypeEDF Application::determineTypeEDF(const std::string& token) const
+{
+  std::map<std::string, KeywordScene>::const_iterator it = m_mapKeywordScene.find(token);
+  if (it == m_mapKeywordScene.end())
+  {
+    std::cerr << "ERROR: determineTypeEDF() Unknown token " << token << '\n';
+    return TYPE_EDF;
+  }
+
+  switch (it->second)
+  {
+    case KS_EDF:
+      return TYPE_EDF;
+    case KS_EDF_DIFFUSE:
+      return TYPE_EDF_DIFFUSE;
+    case KS_EDF_SPOT:
+      return TYPE_EDF_SPOT;
+    case KS_EDF_IES:
+      return TYPE_EDF_IES;
+    default:
+      std::cerr << "ERROR: determineTypeEDF() Unexpected BXDF keyword " << token << '\n';
+      return TYPE_EDF;
+  }
+}
+
+
+bool Application::loadSceneDescription(const std::string& filename)
 {
   Parser parser;
 
@@ -1598,26 +1551,11 @@ bool Application::loadSceneDescription(std::string const& filename)
   // which means the order of transformations is simply from left to right matrix, means first matrix is applied first,
   // but puts the translation into the last row elements (12 to 14).
 
-  std::stack<dp::math::Mat44f> stackMatrix;
-  std::stack<dp::math::Mat44f> stackInverse;      // DAR FIXME This will become important for arbitrary mesh lights.
-  std::stack<dp::math::Quatf>  stackOrientation;
+  std::stack<SceneState> stackSceneState;
 
-  // Initialize all current transformations with identity.
-  dp::math::Mat44f curMatrix(dp::math::cIdentity44f);      // object to world
-  dp::math::Mat44f curInverse(dp::math::cIdentity44f);     // world to object
-  dp::math::Quatf  curOrientation(0.0f, 0.0f, 0.0f, 1.0f); // object to world
+  SceneState cur;
 
-  // Material parameters.
-  float3 curAlbedo          = make_float3(1.0f);
-  float2 curRoughness       = make_float2(0.1f);
-  float3 curAbsorptionColor = make_float3(1.0f);
-  float  curAbsorptionScale = 0.0f; // 0.0f means off.
-  float  curIOR             = 1.5f;
-  bool   curThinwalled      = false;
-  
-  // FIXME Add a mechanism to specify albedo textures per material and make that resetable or add a push/pop mechanism for materials.
-  // E.g. special case filename "none" which translates to empty filename, which switches off albedo textures.
-  // Get rid of the single hardcoded texture and the toggle.
+  cur.reset(); // Reset state to identity transforms and default material parameters.
 
   while ((tokenType = parser.getNextToken(token)) != PTT_EOF)
   {
@@ -1630,159 +1568,327 @@ bool Application::loadSceneDescription(std::string const& filename)
 
     if (tokenType == PTT_ID) 
     {
-      std::map<std::string, KeywordScene>::const_iterator it = m_mapKeywordScene.find(token);
-      if (it == m_mapKeywordScene.end())
+      std::map<std::string, KeywordScene>::const_iterator itKeyword = m_mapKeywordScene.find(token);
+      if (itKeyword == m_mapKeywordScene.end())
       {
-        std::cerr << "loadSceneDescription(): Unknown token " << token << " ignored.\n";
-        // MY_ASSERT(!"loadSceneDescription(): Unknown token ignored.");
+        std::cerr << "WARNING: loadSceneDescription() Unknown token " << token << " ignored.\n";
+        // MY_ASSERT(!"loadSceneDescription() Unknown token ignored.");
         continue; // Just keep getting the next token until a known keyword is found.
       }
 
-      const KeywordScene keyword = it->second;
+      const KeywordScene keyword = itKeyword->second;
 
       switch (keyword)
       {
+        // Lens shader, center, camera and tonemapper values 
+        // can be set in system and scene description. Latter takes precendence.
+        // These are global states not affected by push/pop. Last one wins.
+        case KS_LENS_SHADER:
+          tokenType = parser.getNextToken(token);
+          MY_ASSERT(tokenType == PTT_VAL);
+          m_typeLens = static_cast<TypeLens>(atoi(token.c_str()));
+          if (m_typeLens < TYPE_LENS_PINHOLE || TYPE_LENS_SPHERE < m_typeLens)
+          {
+            m_typeLens = TYPE_LENS_PINHOLE;
+          }
+          break;
+
+        case KS_CENTER:
+        {
+          tokenType = parser.getNextToken(token);
+          MY_ASSERT(tokenType == PTT_VAL);
+          const float x = (float) atof(token.c_str());
+          tokenType = parser.getNextToken(token);
+          MY_ASSERT(tokenType == PTT_VAL);
+          const float y = (float) atof(token.c_str());
+          tokenType = parser.getNextToken(token);
+          MY_ASSERT(tokenType == PTT_VAL);
+          const float z = (float) atof(token.c_str());
+          m_camera.m_center = make_float3(x, y, z);
+          m_camera.markDirty();
+          break;
+        }
+
+        case KS_CAMERA:
+          tokenType = parser.getNextToken(token);
+          MY_ASSERT(tokenType == PTT_VAL);
+          m_camera.m_phi = (float) atof(token.c_str());
+          tokenType = parser.getNextToken(token);
+          MY_ASSERT(tokenType == PTT_VAL);
+          m_camera.m_theta = (float) atof(token.c_str());
+          tokenType = parser.getNextToken(token);
+          MY_ASSERT(tokenType == PTT_VAL);
+          m_camera.m_fov = (float) atof(token.c_str());
+          tokenType = parser.getNextToken(token);
+          MY_ASSERT(tokenType == PTT_VAL);
+          m_camera.m_distance = (float) atof(token.c_str());
+          m_camera.markDirty();
+          break;
+
+        case KS_GAMMA:
+          tokenType = parser.getNextToken(token);
+          MY_ASSERT(tokenType == PTT_VAL);
+          m_tonemapperGUI.gamma = (float) atof(token.c_str());
+          break;
+
+        case KS_COLOR_BALANCE:
+          tokenType = parser.getNextToken(token);
+          MY_ASSERT(tokenType == PTT_VAL);
+          m_tonemapperGUI.colorBalance[0] = (float) atof(token.c_str());
+          tokenType = parser.getNextToken(token);
+          MY_ASSERT(tokenType == PTT_VAL);
+          m_tonemapperGUI.colorBalance[1] = (float) atof(token.c_str());
+          tokenType = parser.getNextToken(token);
+          MY_ASSERT(tokenType == PTT_VAL);
+          m_tonemapperGUI.colorBalance[2] = (float) atof(token.c_str());
+          break;
+
+        case KS_WHITE_POINT:
+          tokenType = parser.getNextToken(token);
+          MY_ASSERT(tokenType == PTT_VAL);
+          m_tonemapperGUI.whitePoint = (float) atof(token.c_str());
+          break;
+
+        case KS_BURN_HIGHLIGHTS:
+          tokenType = parser.getNextToken(token);
+          MY_ASSERT(tokenType == PTT_VAL);
+          m_tonemapperGUI.burnHighlights = (float) atof(token.c_str());
+          break;
+
+        case KS_CRUSH_BLACKS:
+          tokenType = parser.getNextToken(token);
+          MY_ASSERT(tokenType == PTT_VAL);
+          m_tonemapperGUI.crushBlacks = (float) atof(token.c_str());
+          break;
+
+        case KS_SATURATION:
+          tokenType = parser.getNextToken(token);
+          MY_ASSERT(tokenType == PTT_VAL);
+          m_tonemapperGUI.saturation = (float) atof(token.c_str());
+          break;
+
+        case KS_BRIGHTNESS:
+          tokenType = parser.getNextToken(token);
+          MY_ASSERT(tokenType == PTT_VAL);
+          m_tonemapperGUI.brightness = (float) atof(token.c_str());
+          break;
+
         case KS_ALBEDO:
           tokenType = parser.getNextToken(token);
           MY_ASSERT(tokenType == PTT_VAL);
-          curAlbedo.x = (float) atof(token.c_str());
+          cur.material.colorAlbedo.x = (float) atof(token.c_str());
           tokenType = parser.getNextToken(token);
           MY_ASSERT(tokenType == PTT_VAL);
-          curAlbedo.y = (float) atof(token.c_str());
+          cur.material.colorAlbedo.y = (float) atof(token.c_str());
           tokenType = parser.getNextToken(token);
           MY_ASSERT(tokenType == PTT_VAL);
-          curAlbedo.z = (float) atof(token.c_str());
+          cur.material.colorAlbedo.z = (float) atof(token.c_str());
+          break;
+
+        case KS_ALBEDO_TEXTURE:
+          tokenType = parser.getNextToken(token);
+          MY_ASSERT(tokenType == PTT_STRING);
+          convertPath(token);
+          cur.material.nameAlbedo = token;
+          break;
+
+        case KS_CUTOUT_TEXTURE:
+          tokenType = parser.getNextToken(token);
+          MY_ASSERT(tokenType == PTT_STRING);
+          convertPath(token);
+          cur.material.nameCutout = token;
           break;
 
         case KS_ROUGHNESS:
           tokenType = parser.getNextToken(token);
           MY_ASSERT(tokenType == PTT_VAL);
-          curRoughness.x = (float) atof(token.c_str());
+          cur.material.roughness.x = (float) atof(token.c_str());
           tokenType = parser.getNextToken(token);
           MY_ASSERT(tokenType == PTT_VAL);
-          curRoughness.y = (float) atof(token.c_str());
+          cur.material.roughness.y = (float) atof(token.c_str());
           break;
 
-        case KS_ABSORPTION: // For convenience this is an absoption color used to calculate the absorption coefficient.
+        case KS_ABSORPTION: // For convenience this is an 'absorption color' used to calculate the absorption coefficient.
           tokenType = parser.getNextToken(token);
           MY_ASSERT(tokenType == PTT_VAL);
-          curAbsorptionColor.x = (float) atof(token.c_str());
+          cur.material.colorAbsorption.x = (float) atof(token.c_str());
           tokenType = parser.getNextToken(token);
           MY_ASSERT(tokenType == PTT_VAL);
-          curAbsorptionColor.y = (float) atof(token.c_str());
+          cur.material.colorAbsorption.y = (float) atof(token.c_str());
           tokenType = parser.getNextToken(token);
           MY_ASSERT(tokenType == PTT_VAL);
-          curAbsorptionColor.z = (float) atof(token.c_str());
+          cur.material.colorAbsorption.z = (float) atof(token.c_str());
           break;
 
         case KS_ABSORPTION_SCALE:
           tokenType = parser.getNextToken(token);
           MY_ASSERT(tokenType == PTT_VAL);
-          curAbsorptionScale = (float) atof(token.c_str());
+          cur.material.scaleAbsorption = (float) atof(token.c_str());
           break;
 
         case KS_IOR:
           tokenType = parser.getNextToken(token);
           MY_ASSERT(tokenType == PTT_VAL);
-          curIOR = (float) atof(token.c_str());
+          cur.material.ior = (float) atof(token.c_str());
           break;
 
         case KS_THINWALLED:
           tokenType = parser.getNextToken(token);
           MY_ASSERT(tokenType == PTT_VAL);
-          curThinwalled = (atoi(token.c_str()) != 0);
+          cur.material.thinwalled = (atoi(token.c_str()) != 0);
+          break;
+
+        case KS_EMISSION:
+          tokenType = parser.getNextToken(token);
+          MY_ASSERT(tokenType == PTT_VAL);
+          cur.material.colorEmission.x = (float) atof(token.c_str());
+          tokenType = parser.getNextToken(token);
+          MY_ASSERT(tokenType == PTT_VAL);
+          cur.material.colorEmission.y = (float) atof(token.c_str());
+          tokenType = parser.getNextToken(token);
+          MY_ASSERT(tokenType == PTT_VAL);
+          cur.material.colorEmission.z = (float) atof(token.c_str());
+          break;
+
+        case KS_EMISSION_MULTIPLIER:
+          tokenType = parser.getNextToken(token);
+          MY_ASSERT(tokenType == PTT_VAL);
+          cur.material.multiplierEmission = (float) atof(token.c_str());
+          break;
+
+        case KS_EMISSION_PROFILE:
+          tokenType = parser.getNextToken(token);
+          MY_ASSERT(tokenType == PTT_STRING);
+          convertPath(token);
+          cur.material.nameProfile = token;
+          break;
+
+        case KS_EMISSION_TEXTURE:
+          tokenType = parser.getNextToken(token);
+          MY_ASSERT(tokenType == PTT_STRING);
+          convertPath(token);
+          cur.material.nameEmission = token;
+          break;
+
+        case KS_SPOT_ANGLE:
+          tokenType = parser.getNextToken(token);
+          MY_ASSERT(tokenType == PTT_VAL);
+          cur.material.spotAngle = (float) atof(token.c_str());
+          cur.material.spotAngle = clamp(cur.material.spotAngle, 0.0f, 180.0f);
+          break;
+
+        case KS_SPOT_EXPONENT:
+          tokenType = parser.getNextToken(token);
+          MY_ASSERT(tokenType == PTT_VAL);
+          cur.material.spotExponent = (float) atof(token.c_str());
           break;
 
         case KS_MATERIAL:
           {
-            std::string nameMaterialReference;
-            tokenType = parser.getNextToken(nameMaterialReference); // Internal material name. If there are duplicates the last name wins.
+            tokenType = parser.getNextToken(cur.material.name); // Internal material reference name. If there are duplicates the last name wins.
             //MY_ASSERT(tokenType == PTT_ID); // Allow any type of identifier, including strings and numbers.
 
-            std::string nameMaterial;
-            tokenType = parser.getNextToken(nameMaterial); // The actual material name.
-            //MY_ASSERT(tokenType == PTT_ID); // Allow any type of identifier, including strings and numbers.
+            tokenType = parser.getNextToken(token); // BXDF identifier.
+            MY_ASSERT(tokenType == PTT_ID);
+            cur.material.typeBXDF = determineTypeBXDF(token);
 
-            // Create this material in the GUI.
+            tokenType = parser.getNextToken(token); // EDF identifier
+            MY_ASSERT(tokenType == PTT_ID);
+            cur.material.typeEDF = determineTypeEDF(token);
+
             const int indexMaterial = static_cast<int>(m_materialsGUI.size());
 
-            MaterialGUI materialGUI;
+            m_materialsGUI.push_back(cur.material); // Store all current host material parameters.
 
-            materialGUI.name = nameMaterialReference;
+            m_mapMaterialReferences[cur.material.name] = indexMaterial;
 
-            materialGUI.indexBSDF = INDEX_BRDF_DIFFUSE; // Set a default BSDF. // Base direct callable index for the BXDFs.
-            // Handle all cases to get the correct error.
-            // DAR FIXME Put these into a std::map and do a fined here.
-            if (nameMaterial == std::string("brdf_diffuse"))
+            // Cache the referenced pictures to load them only once.
+            // FIXME Put this into a helper function.
+            // FIXME Only load textures actually referenced inside the scene.
+            if (!cur.material.nameAlbedo.empty())
             {
-              materialGUI.indexBSDF = INDEX_BRDF_DIFFUSE;
+              std::map<std::string, Picture*>::const_iterator it = m_mapPictures.find(cur.material.nameAlbedo);
+              if (it == m_mapPictures.end())
+              {
+                Picture* picture = new Picture();
+                picture->load(cur.material.nameAlbedo, IMAGE_FLAG_2D);
+
+                m_mapPictures[cur.material.nameAlbedo] = picture;
+              }
             }
-            else if (nameMaterial == std::string("brdf_specular"))
+            
+            if (!cur.material.nameCutout.empty())
             {
-              materialGUI.indexBSDF = INDEX_BRDF_SPECULAR;
-            }
-            else if (nameMaterial == std::string("bsdf_specular"))
-            {
-              materialGUI.indexBSDF = INDEX_BSDF_SPECULAR;
-            }
-            else if (nameMaterial == std::string("brdf_ggx_smith"))
-            {
-              materialGUI.indexBSDF = INDEX_BRDF_GGX_SMITH;
-            }
-            else if (nameMaterial == std::string("bsdf_ggx_smith"))
-            {
-              materialGUI.indexBSDF = INDEX_BSDF_GGX_SMITH;
-            }
-            else
-            {
-              std::cerr << "WARNING: loadSceneDescription() unknown material " << nameMaterial << '\n';
+              std::map<std::string, Picture*>::const_iterator it = m_mapPictures.find(cur.material.nameCutout);
+              if (it == m_mapPictures.end())
+              {
+                Picture* picture = new Picture();
+                picture->load(cur.material.nameCutout, IMAGE_FLAG_2D);
+
+                m_mapPictures[cur.material.nameCutout] = picture;
+              }
             }
 
-            materialGUI.albedo           = curAlbedo;
-            materialGUI.roughness        = curRoughness;
-            materialGUI.absorptionColor  = curAbsorptionColor;
-            materialGUI.absorptionScale  = curAbsorptionScale;
-            materialGUI.ior              = curIOR;
-            materialGUI.thinwalled       = curThinwalled;
-            materialGUI.useAlbedoTexture = false;
-            materialGUI.useCutoutTexture = false;
+            if (!cur.material.nameEmission.empty())
+            {
+              std::map<std::string, Picture*>::const_iterator it = m_mapPictures.find(cur.material.nameEmission);
+              if (it == m_mapPictures.end())
+              {
+                Picture* picture = new Picture();
+                picture->load(cur.material.nameEmission, IMAGE_FLAG_2D); // Load as 2D by default. env or rect will be ORed into the flags later.
 
-            m_materialsGUI.push_back(materialGUI); // at indexMaterial.
+                m_mapPictures[cur.material.nameEmission] = picture;
+              }
+            }
 
-            m_mapMaterialReferences[nameMaterialReference] = indexMaterial; // FIXME Change this to a full blown material system later.
+            // FIXME Maybe use the emissionTexture with *.ies files as special case?
+            // Then IES profiles could be used as environment light and projection for singular lights is implemented already.
+            // This doesn't work for mesh lights. Also the environment lights are expected to be colored. 
+            // This calls even more for a separation of Pictures from Samplers (texture objects).
+            if (!cur.material.nameProfile.empty())
+            {
+              std::map<std::string, Picture*>::const_iterator it = m_mapPictures.find(cur.material.nameProfile);
+              if (it == m_mapPictures.end())
+              {
+                // Load the IES profile and convert it to an omnidirectional projection texture for a point light. 
+                LoaderIES loaderIES;
+
+                if (loaderIES.load(cur.material.nameProfile))
+                {
+                  if (loaderIES.parse())
+                  {
+                    Picture* picture = new Picture();
+                    picture->createIES(loaderIES.getData()); // This generates the 2D 1-component luminance float image.
+
+                    m_mapPictures[cur.material.nameProfile] = picture;
+                  }
+                }
+              }
+            }
           }
           break;
 
         case KS_IDENTITY:
-          curMatrix      = dp::math::cIdentity44f;
-          curInverse     = dp::math::cIdentity44f;
-          curOrientation = dp::math::Quatf(0.0f, 0.0f, 0.0f, 1.0f); // identity orientation
+          cur.matrix         = dp::math::cIdentity44f;
+          cur.matrixInv      = dp::math::cIdentity44f;
+          cur.orientation    = dp::math::Quatf(0.0f, 0.0f, 0.0f, 1.0f);
+          cur.orientationInv = dp::math::Quatf(0.0f, 0.0f, 0.0f, 1.0f);
           break;
 
         case KS_PUSH:
-          stackMatrix.push(curMatrix);
-          stackInverse.push(curInverse);
-          stackOrientation.push(curOrientation);
+          stackSceneState.push(cur);
           break;
 
         case KS_POP:
-          if (!stackMatrix.empty())
+          if (!stackSceneState.empty())
           {
-            MY_ASSERT(!stackInverse.empty());
-            MY_ASSERT(!stackOrientation.empty());
-            curMatrix = stackMatrix.top();
-            stackMatrix.pop();
-            curInverse = stackInverse.top();
-            stackInverse.pop();
-            curOrientation = stackOrientation.top();
-            stackOrientation.pop();
+            cur = stackSceneState.top();
+            stackSceneState.pop();
           }
           else
           {
-            std::cerr << "ERROR: loadSceneDescription() pop on empty stack. Resetting to identity.\n";
-            curMatrix      = dp::math::cIdentity44f;
-            curInverse     = dp::math::cIdentity44f;
-            curOrientation = dp::math::Quatf(0.0f, 0.0f, 0.0f, 1.0f); // identity orientation
+            std::cerr << "ERROR: loadSceneDescription() pop on empty stack. Resetting SceneState to defaults.\n";
+            cur.reset();
           }
           break;
 
@@ -1805,16 +1911,19 @@ bool Application::loadSceneDescription(std::string const& filename)
             MY_ASSERT(tokenType == PTT_VAL);
             const float angle = dp::math::degToRad((float) atof(token.c_str()));
 
-            dp::math::Quatf rotation(axis, angle);
-            curOrientation *= rotation;
+            const dp::math::Quatf rotation(axis, angle);
+            cur.orientation *= rotation;
+           
+            // Inverse. Opposite order of multiplications.
+            const dp::math::Quatf rotationInv(axis, -angle);
+            cur.orientationInv = rotationInv * cur.orientationInv;
         
-            dp::math::Mat44f matrix(rotation, dp::math::Vec3f(0.0f, 0.0f, 0.0f)); // Zero translation to get a Mat44f back. 
-            curMatrix *= matrix; // DEBUG No need for the local matrix variable.
+            const dp::math::Mat44f matrix(rotation, dp::math::Vec3f(0.0f, 0.0f, 0.0f)); // Zero translation to get a Mat44f back. 
+            cur.matrix *= matrix; // DEBUG No need for the local matrix variable.
         
             // Inverse. Opposite order of matrix multiplications to make M * M^-1 = I.
-            dp::math::Quatf rotationInv(axis, -angle);
-            dp::math::Mat44f matrixInv(rotationInv, dp::math::Vec3f(0.0f, 0.0f, 0.0f)); // Zero translation to get a Mat44f back. 
-            curInverse = matrixInv * curInverse; // DEBUG No need for the local matrixInv variable.
+            const dp::math::Mat44f matrixInv(rotationInv, dp::math::Vec3f(0.0f, 0.0f, 0.0f)); // Zero translation to get a Mat44f back. 
+            cur.matrixInv = matrixInv * cur.matrixInv; // DEBUG No need for the local matrixInv variable.
           }
           break;
 
@@ -1832,14 +1941,14 @@ bool Application::loadSceneDescription(std::string const& filename)
             MY_ASSERT(tokenType == PTT_VAL);
             scaling[2][2] = (float) atof(token.c_str());
 
-            curMatrix *= scaling;
+            cur.matrix *= scaling;
 
             // Inverse. // DEBUG Requires scalings to not contain zeros.
             scaling[0][0] = 1.0f / scaling[0][0];
             scaling[1][1] = 1.0f / scaling[1][1];
             scaling[2][2] = 1.0f / scaling[2][2];
 
-            curInverse = scaling * curInverse;
+            cur.matrixInv = scaling * cur.matrixInv;
           }
           break;
 
@@ -1858,20 +1967,20 @@ bool Application::loadSceneDescription(std::string const& filename)
             MY_ASSERT(tokenType == PTT_VAL);
             translation[3][2] = (float) atof(token.c_str());
 
-            curMatrix *= translation;
+            cur.matrix *= translation;
 
             translation[3][0] = -translation[3][0];
             translation[3][1] = -translation[3][1];
             translation[3][2] = -translation[3][2];
 
-            curInverse = translation * curInverse;
+            cur.matrixInv = translation * cur.matrixInv;
           }
           break;
 
         case KS_MODEL:
           tokenType = parser.getNextToken(token);
           MY_ASSERT(tokenType == PTT_ID);
-       
+
           if (token == "plane")
           {
             tokenType = parser.getNextToken(token);
@@ -1888,8 +1997,9 @@ bool Application::loadSceneDescription(std::string const& filename)
 
             std::string nameMaterialReference;
             tokenType = parser.getNextToken(nameMaterialReference);
-                    
+
             std::ostringstream keyGeometry;
+
             keyGeometry << "plane_" << tessU << "_" << tessV << "_" << upAxis;
 
             std::shared_ptr<sg::Triangles> geometry;
@@ -1906,10 +2016,12 @@ bool Application::loadSceneDescription(std::string const& filename)
             }
             else
             {
-              geometry = m_geometries[itg->second];
+              geometry = std::dynamic_pointer_cast<sg::Triangles>(m_geometries[itg->second]);
             }
 
-            appendInstance(m_scene, geometry, curMatrix, nameMaterialReference, m_idInstance);
+            const int indexMaterial = findMaterial(nameMaterialReference);
+
+            appendInstance(m_scene, geometry, cur.matrix, indexMaterial, -1);
           }
           else if (token == "box")
           {
@@ -1933,10 +2045,12 @@ bool Application::loadSceneDescription(std::string const& filename)
             }
             else
             {
-              geometry = m_geometries[itg->second];
+              geometry = std::dynamic_pointer_cast<sg::Triangles>(m_geometries[itg->second]);
             }
 
-            appendInstance(m_scene, geometry, curMatrix, nameMaterialReference, m_idInstance);
+            const int indexMaterial = findMaterial(nameMaterialReference);
+
+            appendInstance(m_scene, geometry, cur.matrix, indexMaterial, -1);
           }
           else if (token == "sphere")
           {
@@ -1973,10 +2087,12 @@ bool Application::loadSceneDescription(std::string const& filename)
             }
             else
             {
-              geometry = m_geometries[itg->second];
+              geometry = std::dynamic_pointer_cast<sg::Triangles>(m_geometries[itg->second]);
             }
 
-            appendInstance(m_scene, geometry, curMatrix, nameMaterialReference, m_idInstance);
+            const int indexMaterial = findMaterial(nameMaterialReference);
+
+            appendInstance(m_scene, geometry, cur.matrix, indexMaterial, -1);
           }
           else if (token == "torus")
           {
@@ -2016,10 +2132,12 @@ bool Application::loadSceneDescription(std::string const& filename)
             }
             else
             {
-              geometry = m_geometries[itg->second];
+              geometry = std::dynamic_pointer_cast<sg::Triangles>(m_geometries[itg->second]);
             }
 
-            appendInstance(m_scene, geometry, curMatrix, nameMaterialReference, m_idInstance);
+            const int indexMaterial = findMaterial(nameMaterialReference);
+
+            appendInstance(m_scene, geometry, cur.matrix, indexMaterial, -1);
           }
           else if (token == "assimp")
           {
@@ -2033,15 +2151,15 @@ bool Application::loadSceneDescription(std::string const& filename)
             // nvpro-pipeline matrices are row-major multiplied from the right, means the translation is in the last row. Transpose!
             const float trafo[12] =
             {
-              curMatrix[0][0], curMatrix[1][0], curMatrix[2][0], curMatrix[3][0], 
-              curMatrix[0][1], curMatrix[1][1], curMatrix[2][1], curMatrix[3][1], 
-              curMatrix[0][2], curMatrix[1][2], curMatrix[2][2], curMatrix[3][2]
+              cur.matrix[0][0], cur.matrix[1][0], cur.matrix[2][0], cur.matrix[3][0], 
+              cur.matrix[0][1], cur.matrix[1][1], cur.matrix[2][1], cur.matrix[3][1], 
+              cur.matrix[0][2], cur.matrix[1][2], cur.matrix[2][2], cur.matrix[3][2]
             };
 
-            MY_ASSERT(curMatrix[0][3] == 0.0f && 
-                      curMatrix[1][3] == 0.0f && 
-                      curMatrix[2][3] == 0.0f && 
-                      curMatrix[3][3] == 1.0f);
+            MY_ASSERT(cur.matrix[0][3] == 0.0f &&
+                      cur.matrix[1][3] == 0.0f &&
+                      cur.matrix[2][3] == 0.0f &&
+                      cur.matrix[3][3] == 1.0f);
 
             std::shared_ptr<sg::Instance> instance(new sg::Instance(m_idInstance++));
             instance->setTransform(trafo);
@@ -2049,7 +2167,235 @@ bool Application::loadSceneDescription(std::string const& filename)
 
             m_scene->addChild(instance);
           }
+          else
+          {
+            std::cerr << "WARNING: loadSceneDescription() unknown model type "<< token << '\n';
+          }
           break;
+
+        case KS_LIGHT:
+        {
+          // One of the predefined light types: env, rect, point, spot, ies
+          tokenType = parser.getNextToken(token);
+          MY_ASSERT(tokenType == PTT_ID);
+
+          std::string nameMaterialReference;
+          tokenType = parser.getNextToken(nameMaterialReference);
+          //MY_ASSERT(tokenType == PTT_ID); // Allow any type of identifier, including strings and numbers.
+
+          const int indexMaterial = findMaterial(nameMaterialReference);
+          
+          if (indexMaterial < 0) // Lights require a material reference. 
+          {
+            std::cerr << "ERROR: loadSceneDescription() Light referenced unknown material " << nameMaterialReference << '\n';
+            break;
+          }
+
+          const MaterialGUI& materialGUI = m_materialsGUI[indexMaterial];
+          
+          // FIXME Use the m_mapKeywords and a switch here.
+          if (token == "env") // Constant or spherical texture map environment light.
+          {
+            // There can be only one environment light and it must be the first light definition.
+            if (m_lightsGUI.size() == 0)
+            {
+              LightGUI lightGUI;
+            
+              // FIXME This type selection would need to be handled via different env keywords for more than two environment lights (e.g. hemisphere).
+              lightGUI.typeLight = (materialGUI.nameEmission.empty()) ? TYPE_LIGHT_ENV_CONST : TYPE_LIGHT_ENV_SPHERE;
+              // Transformation is taken from the current scene state. Only orientation is used for spherical environment lights.
+              lightGUI.matrix         = cur.matrix;
+              lightGUI.matrixInv      = cur.matrixInv;
+              lightGUI.orientation    = cur.orientation;
+              lightGUI.orientationInv = cur.orientationInv;
+              // All other light parameters are taken from the referenced material.
+              lightGUI.idGeometry         = ~0u; // Unused. Not a mesh light.
+              lightGUI.idMaterial         = indexMaterial;
+              lightGUI.area               = 4.0f * M_PIf; // Unused.
+
+              m_lightsGUI.push_back(lightGUI);
+
+              if (!materialGUI.nameEmission.empty())
+              {
+                std::map<std::string, Picture*>::iterator it = m_mapPictures.find(materialGUI.nameEmission);
+                MY_ASSERT(it != m_mapPictures.end()); // Must have been loaded when the material was parsed.
+                if (it != m_mapPictures.end())
+                {
+                  MY_ASSERT((it->second->getFlags() & IMAGE_FLAG_RECT) == 0); // Cannot have the same texture for env and rect. There is only one CDF.
+                  it->second->addFlags(IMAGE_FLAG_ENV);
+                }
+              }
+            }
+            else
+            {
+              std::cerr << "ERROR: loadSceneDescription() Environment lights must be specified first.\n";
+            }
+          }
+          else if (token == "rect") // Rectangle area light, supports importance sampled textures. (Mesh lights don't.)
+          {
+            // Rectangular area light source, emission is singled sided on the front face.
+            // Represented as two triangles with extents from -0.5 to 0.5 (== 1.0 m^2) on the xy-plane with the positive z-axis as normal.
+            // Use the transformations to scale, rotate and translate it in world space.
+            LightGUI lightGUI;
+            
+            lightGUI.typeLight = TYPE_LIGHT_RECT;
+            // Transformation is taken from the current scene state. Only orientation is used for spherical environment lights.
+            lightGUI.matrix         = cur.matrix;
+            lightGUI.matrixInv      = cur.matrixInv;
+            lightGUI.orientation    = cur.orientation;
+            lightGUI.orientationInv = cur.orientationInv;
+            // All other light parameters are taken from the referenced material.
+            lightGUI.idGeometry = ~0u;
+            lightGUI.idMaterial = indexMaterial;
+            
+            // Calculate the world space rectangle area.
+            //const dp::math::Vec3f vecU(dp::math::Vec4f(1.0f, 0.0f, 0.0f, 0.0f) * lightGUI.matrix);
+            //const dp::math::Vec3f vecV(dp::math::Vec4f(0.0f, 1.0f, 0.0f, 0.0f) * lightGUI.matrix);
+            // Optimized version: 
+            const dp::math::Vec3f vecU(lightGUI.matrix[0]);
+            const dp::math::Vec3f vecV(lightGUI.matrix[1]);
+
+            lightGUI.area = dp::math::length(vecU ^ vecV); // Rectangle area is the length of the cross product of the edges.
+
+            const int indexLight = static_cast<int>(m_lightsGUI.size());
+
+            m_lightsGUI.push_back(lightGUI);
+
+            if (!materialGUI.nameEmission.empty())
+            {
+              std::map<std::string, Picture*>::iterator it = m_mapPictures.find(materialGUI.nameEmission);
+              MY_ASSERT(it != m_mapPictures.end()); // Must have been loaded when the material was parsed.
+              if (it != m_mapPictures.end())
+              {
+                MY_ASSERT((it->second->getFlags() & IMAGE_FLAG_ENV) == 0); // Cannot have the same texture for env and rect. There is only one CDF.
+                it->second->addFlags(IMAGE_FLAG_RECT);
+              }
+            }
+
+            // Create the rectangle geometry.
+            std::ostringstream keyGeometry;
+            keyGeometry << "rect";
+
+            std::shared_ptr<sg::Triangles> geometry;
+
+            std::map<std::string, unsigned int>::const_iterator itg = m_mapGeometries.find(keyGeometry.str());
+            if (itg == m_mapGeometries.end())
+            {
+              m_mapGeometries[keyGeometry.str()] = m_idGeometry;
+
+              geometry = std::make_shared<sg::Triangles>(m_idGeometry++);
+              geometry->createRect();
+
+              m_geometries.push_back(geometry);
+            }
+            else
+            {
+              geometry = std::dynamic_pointer_cast<sg::Triangles>(m_geometries[itg->second]);
+            }
+            // The rect light is adding a light definition, but also add geometry with an emissive material to the scene graph.
+            // That the indexLight is not -1 here will let the createMeshLights() routine, or more precisely the traverseGraph()
+            // function in there not append another light definition.
+            appendInstance(m_scene, geometry, cur.matrix, indexMaterial, indexLight);
+          }
+          else if (token == "point")
+          {
+            LightGUI lightGUI;
+            
+            lightGUI.typeLight = TYPE_LIGHT_POINT;
+            // Transformation is taken from the current scene state.
+            lightGUI.matrix         = cur.matrix;
+            lightGUI.matrixInv      = cur.matrixInv;
+            lightGUI.orientation    = cur.orientation;
+            lightGUI.orientationInv = cur.orientationInv;
+            // All other light parameters are taken from the referenced material.
+            lightGUI.idGeometry = ~0u;
+            lightGUI.idMaterial = indexMaterial;
+            
+            lightGUI.area = 1.0f; // Unused for singular lights. 
+
+            const int indexLight = static_cast<int>(m_lightsGUI.size());
+
+            m_lightsGUI.push_back(lightGUI);
+            
+            if (!materialGUI.nameEmission.empty())
+            {
+              std::map<std::string, Picture*>::iterator it = m_mapPictures.find(materialGUI.nameEmission);
+              MY_ASSERT(it != m_mapPictures.end()); // Must have been loaded when the material was parsed.
+              if (it != m_mapPictures.end())
+              {
+                it->second->addFlags(IMAGE_FLAG_POINT);
+              }
+            }
+            // No geometry. A singular light cannot be hit implicitly.
+          }
+          else if (token == "spot") // Spot light singular light type. Emission texture is projected over the open spread angle.
+          {
+            LightGUI lightGUI;
+            
+            lightGUI.typeLight = TYPE_LIGHT_SPOT; 
+            // Transformation is taken from the current scene state.
+            lightGUI.matrix         = cur.matrix;
+            lightGUI.matrixInv      = cur.matrixInv;
+            lightGUI.orientation    = cur.orientation;
+            lightGUI.orientationInv = cur.orientationInv;
+            // All other light parameters are taken from the referenced material.
+            lightGUI.idGeometry = ~0u;
+            lightGUI.idMaterial = indexMaterial;
+            
+            lightGUI.area = 1.0f; // Unused for singular lights. 
+
+            const int indexLight = static_cast<int>(m_lightsGUI.size());
+
+            m_lightsGUI.push_back(lightGUI);
+            
+            if (!materialGUI.nameEmission.empty())
+            {
+              std::map<std::string, Picture*>::iterator it = m_mapPictures.find(materialGUI.nameEmission);
+              MY_ASSERT(it != m_mapPictures.end()); // Must have been loaded when the material was parsed.
+              if (it != m_mapPictures.end())
+              {
+                it->second->addFlags(IMAGE_FLAG_SPOT);
+              }
+            }
+            // No geometry. A singular light cannot be hit implicitly.
+          }
+          else if (token == "ies")
+          {
+            LightGUI lightGUI;
+            
+            lightGUI.typeLight = TYPE_LIGHT_IES;
+            // Transformation is taken from the current scene state.
+            lightGUI.matrix         = cur.matrix;
+            lightGUI.matrixInv      = cur.matrixInv;
+            lightGUI.orientation    = cur.orientation;
+            lightGUI.orientationInv = cur.orientationInv;
+            // All other light parameters are taken from the referenced material.
+            lightGUI.idGeometry = ~0u;
+            lightGUI.idMaterial = indexMaterial;
+            
+            lightGUI.area = 1.0f; // Unused for singular lights. 
+
+            const int indexLight = static_cast<int>(m_lightsGUI.size());
+
+            m_lightsGUI.push_back(lightGUI);
+
+            if (!materialGUI.nameProfile.empty())
+            {
+              std::map<std::string, Picture*>::iterator it = m_mapPictures.find(materialGUI.nameProfile);
+              MY_ASSERT(it != m_mapPictures.end()); // Must have been loaded when the material was parsed.
+              if (it != m_mapPictures.end())
+              {
+                it->second->addFlags(IMAGE_FLAG_IES); // FIXME This is redundant because generateIES() sets that already.
+              }
+            }
+            // No geometry. A singular light cannot be hit implicitly.
+          }
+          else
+          {
+            std::cerr << "WARNING: loadSceneDescription() unknown light type "<< token << '\n';
+          }
+        }
+        break;
 
         default:
           std::cerr << "ERROR: loadSceneDescription() Unexpected KeywordScene value " << keyword << " ignored.\n";
@@ -2059,13 +2405,164 @@ bool Application::loadSceneDescription(std::string const& filename)
     }
   }
 
-  std::cout << "loadSceneDescription(): m_idGroup = " << m_idGroup << ", m_idInstance = " << m_idInstance << ", m_idGeometry = " << m_idGeometry << '\n';
+  std::cout << "loadSceneDescription() m_idGroup = " << m_idGroup << ", m_idInstance = " << m_idInstance << ", m_idGeometry = " << m_idGeometry << '\n';
 
   return true;
 }
 
 
-bool Application::loadString(std::string const& filename, std::string& text)
+void Application::createMeshLights()
+{
+  // Traverse the host scene graph and append light definitions for all meshes with emissive materials.
+  InstanceData instanceData(~0u, -1, -1);
+
+  float matrix[12];
+
+  // Set the affine matrix to identity by default.
+  memset(matrix, 0, sizeof(float) * 12);
+  matrix[ 0] = 1.0f;
+  matrix[ 5] = 1.0f;
+  matrix[10] = 1.0f;
+
+  traverseGraph(m_scene, instanceData, matrix);
+}
+
+
+// m = a * b;
+static void multiplyMatrix(float* m, const float* a, const float* b)
+{
+  m[0] = a[0] * b[0] + a[1] * b[4] + a[2] * b[ 8]; // + a[3] * 0
+  m[1] = a[0] * b[1] + a[1] * b[5] + a[2] * b[ 9]; // + a[3] * 0
+  m[2] = a[0] * b[2] + a[1] * b[6] + a[2] * b[10]; // + a[3] * 0
+  m[3] = a[0] * b[3] + a[1] * b[7] + a[2] * b[11] + a[3]; // * 1
+
+  m[4] = a[4] * b[0] + a[5] * b[4] + a[6] * b[ 8]; // + a[7] * 0
+  m[5] = a[4] * b[1] + a[5] * b[5] + a[6] * b[ 9]; // + a[7] * 0
+  m[6] = a[4] * b[2] + a[5] * b[6] + a[6] * b[10]; // + a[7] * 0
+  m[7] = a[4] * b[3] + a[5] * b[7] + a[6] * b[11] + a[7]; // * 1
+
+  m[ 8] = a[8] * b[0] + a[9] * b[4] + a[10] * b[ 8]; // + a[11] * 0
+  m[ 9] = a[8] * b[1] + a[9] * b[5] + a[10] * b[ 9]; // + a[11] * 0
+  m[10] = a[8] * b[2] + a[9] * b[6] + a[10] * b[10]; // + a[11] * 0
+  m[11] = a[8] * b[3] + a[9] * b[7] + a[10] * b[11] + a[11]; // * 1
+}
+
+
+// Depth-first traversal of the scene graph to flatten all unique paths to a geometry node to one-level instancing inside the OptiX render graph.
+void Application::traverseGraph(std::shared_ptr<sg::Node> node, InstanceData& instanceData, float matrix[12])
+{
+  switch (node->getType())
+  {
+    case sg::NodeType::NT_GROUP:
+    {
+      std::shared_ptr<sg::Group> group = std::dynamic_pointer_cast<sg::Group>(node);
+      //std::cout << "Group " << group->getId() << ", " << group->getNumChildren() << '\n';
+
+      for (size_t i = 0; i < group->getNumChildren(); ++i)
+      {
+        traverseGraph(group->getChild(i), instanceData, matrix);
+      }
+    }
+    break;
+
+    case sg::NodeType::NT_INSTANCE:
+    {
+      std::shared_ptr<sg::Instance> instance = std::dynamic_pointer_cast<sg::Instance>(node);
+      //std::cout << "Instance " << instance->getId() << ", " << instance->getMaterial() << ", " << instance->getLight() << '\n';
+
+      // Track the assigned material and light indices. Only the bottom-most instance node matters.
+      instanceData.idMaterial = instance->getMaterial();
+      instanceData.idLight    = instance->getLight();
+
+      // Concatenate the transformations along the path.
+      float trafo[12];
+
+      multiplyMatrix(trafo, matrix, instance->getTransform());
+
+      traverseGraph(instance->getChild(), instanceData, trafo);
+      
+      // If there was no light ID on the instance, but the geometry is a mesh light,
+      // assign the new light ID to the bottom-most instance.
+      if (instance->getLight() == -1 && instanceData.idLight != -1)
+      {
+        instance->setLight(instanceData.idLight);
+      }
+      instanceData.idLight = -1; // Clear the returned value to not populate it upwards.
+    }
+    break;
+
+    case sg::NodeType::NT_TRIANGLES:
+    {
+      // Only create a new light definition if the instance is not already holding a valid light index!
+      // This is the case for rectangle lights which add a light definition and add geometry to the scene.
+      if (instanceData.idLight == -1)
+      {
+        std::shared_ptr<sg::Triangles> geometry = std::dynamic_pointer_cast<sg::Triangles>(node);
+        //std::cout << "Triangles " << geometry->getId() << '\n';
+
+        instanceData.idGeometry = geometry->getId();
+
+        // Check if the material assigned to this mesh is emissive and 
+        // return the new idLight to the caller to set it inside the instance.
+        instanceData.idLight = createMeshLight(geometry, instanceData.idMaterial, matrix);
+      }
+    }
+    break;
+  }
+}
+
+int Application::createMeshLight(const std::shared_ptr<sg::Triangles> geometry, const int indexMaterial, const float matrix[12])
+{
+  int indexLight = -1;
+
+  // If an emissive material (edf != TYPE_EDF) is assigned to an arbitrary triangle mesh geometry inside the scene,
+  // create a LightDefinition with the given geometry and append it to m_lightsGUI.
+  if (0 <= indexMaterial)
+  {
+    const MaterialGUI& materialGUI = m_materialsGUI[indexMaterial];
+    
+    if (materialGUI.typeEDF != TYPE_EDF)
+    {
+      LightGUI lightGUI;
+
+      lightGUI.typeLight = TYPE_LIGHT_MESH;
+
+      // nvpro-pipeline matrices are row-major multiplied from the right, means the translation is in the last row. Transpose!
+      dp::math::Mat44f mat44f( { matrix[0], matrix[4], matrix[ 8], 0.0f,
+                                 matrix[1], matrix[5], matrix[ 9], 0.0f,
+                                 matrix[2], matrix[6], matrix[10], 0.0f,
+                                 matrix[3], matrix[7], matrix[11], 1.0f } );
+
+      lightGUI.matrix    = mat44f;
+      lightGUI.matrixInv = mat44f;
+      if (!lightGUI.matrixInv.invert())
+      {
+        std::cerr << "ERROR: Application::createMeshLight() matrix inversion failed.";
+        MY_ASSERT(!"ERROR: Application::createMeshLight() matrix inversion failed.");
+      }
+
+      // HACK PERF It would be involved to decompose the pure rotational part from a generic 4x4 matrix. (dp::math decompose() can do that.)
+      // But rectangle and arbitrary mesh lights use only the 4x4 matrices above, so no need to set the orientation in this mesh light case at all.
+      // Just set the orientation quaternions to identity.
+      lightGUI.orientation    = dp::math::Quatf(0.0f, 0.0f, 0.0f, 1.0f);
+      lightGUI.orientationInv = dp::math::Quatf(0.0f, 0.0f, 0.0f, 1.0f);
+
+      lightGUI.idGeometry = geometry->getId();
+      lightGUI.idMaterial = indexMaterial;
+
+      // Fill in the areaTriangles and cdfAreas and area.
+      geometry->calculateLightArea(lightGUI);
+
+      indexLight = static_cast<int>(m_lightsGUI.size()); // Success, set the proper light index.
+
+      m_lightsGUI.push_back(lightGUI);
+    }
+  }
+  return indexLight;
+}
+
+
+bool Application::loadString(const std::string& filename, std::string& text)
 {
   std::ifstream inputStream(filename);
 
@@ -2089,7 +2586,7 @@ bool Application::loadString(std::string const& filename, std::string& text)
   return true;
 }
 
-bool Application::saveString(std::string const& filename, std::string const& text)
+bool Application::saveString(const std::string& filename, const std::string& text)
 {
   std::ofstream outputStream(filename);
 
@@ -2109,7 +2606,6 @@ bool Application::saveString(std::string const& filename, std::string const& tex
 
   return true;
 }
-
 
 std::string Application::getDateTime()
 {
@@ -2198,8 +2694,7 @@ std::string Application::getDateTime()
   return oss.str();
 }
 
-
-static void updateAABB(float3& minimum, float3& maximum, float3 const& v)
+static void updateAABB(float3& minimum, float3& maximum, const float3& v)
 {
   if (v.x < minimum.x)
   {
@@ -2229,7 +2724,7 @@ static void updateAABB(float3& minimum, float3& maximum, float3 const& v)
   }
 }
 
-//static void calculateTexcoordsSpherical(std::vector<InterleavedHost>& attributes, std::vector<unsigned int> const& indices)
+//static void calculateTexcoordsSpherical(std::vector<InterleavedHost>& attributes, const std::vector<unsigned int>& indices)
 //{
 //  dp::math::Vec3f center(0.0f, 0.0f, 0.0f);
 //  for (size_t i = 0; i < attributes.size(); ++i)
@@ -2283,7 +2778,7 @@ static void updateAABB(float3& minimum, float3& maximum, float3 const& v)
 
 // Calculate texture tangents based on the texture coordinate gradients.
 // Doesn't work when all texture coordinates are identical! Thats the reason for the other routine below.
-//static void calculateTangents(std::vector<InterleavedHost>& attributes, std::vector<unsigned int> const& indices)
+//static void calculateTangents(std::vector<InterleavedHost>& attributes, const std::vector<unsigned int>& indices)
 //{
 //  for (size_t i = 0; i < indices.size(); i += 4)
 //  {
@@ -2331,9 +2826,8 @@ static void updateAABB(float3& minimum, float3& maximum, float3 const& v)
 //  }
 //}
 
-
 // Calculate (geometry) tangents with the global tangent direction aligned to the biggest AABB extend of this part.
-void Application::calculateTangents(std::vector<TriangleAttributes>& attributes, std::vector<unsigned int> const& indices)
+void Application::calculateTangents(std::vector<TriangleAttributes>& attributes, const std::vector<unsigned int>& indices)
 {
   MY_ASSERT(3 <= indices.size());
 
@@ -2524,7 +3018,6 @@ bool Application::screenshot(const bool tonemap)
   return false;
 }
 
-
 // Convert between slashes and backslashes in paths depending on the operating system
 void Application::convertPath(std::string& path)
 {
@@ -2565,6 +3058,3 @@ void Application::convertPath(char* path)
   }
 #endif
 }
-
-
-

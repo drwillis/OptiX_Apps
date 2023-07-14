@@ -31,7 +31,7 @@ add_subdirectory( nvlink_shared )
 # Both rtigo9 and rtigo10 allow toggling the direct lighting at runtime which is usful when testing direct lighting implementations.
 # Singular lights won't have any effect without direct lighting because they cannot be hit implicitly
 # because they don't exist as geometry inside the scene. (Infinitely small lights do not exist in the physical world.)
-#add_subdirectory( rtigo9 )
+add_subdirectory( rtigo9 )
 
 # Same as rtigo9 but using Opacity Micromaps (OMM) for cutout textures which require OptiX SDK 7.6.0 or higher.
 # OMMs are hardware accelerated on RTX Ada generation GPUs.
